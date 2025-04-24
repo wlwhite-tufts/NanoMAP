@@ -1,7 +1,3 @@
-# full metaclustering script (alternative version)
-# essentially runs ANARCI_clustering.py with many parameter settings and does final clustering on the results of those clusterings
-# removed the final merging step from meta_ANARCI_clustering.py because it was causing issues
-
 import numpy as np
 import pandas as pd
 import sys
@@ -55,8 +51,12 @@ parser.add_argument('--linkage',type=str,default=['single','average','complete']
 parser.add_argument('--weighted_min_id',type=float,nargs=2,default=[0.3,0.7],help='Inclusinve bounds for the range of distance cutoff values to use in the weighted hierarchical clustering step.')
 parser.add_argument('--weighted_min_id_N',type=int,default=3,help='Number of values to test between the weighted_min_id bounds.')
 
+parser.add_argument('--score_factor',type=float,default=1.6,help='Keep individual clusterings above this factor times the score of a basic mmseqs clustering. Only kept clusterings are used to use in metaclustering.')
+parser.add_argument('--dist_cutoff',type=float,default=0.4,help='CDR3 distance cutoff to use for determining if a pair of sequences within a cluster matches closely enough when scoring.')
+
 parser.add_argument('--meta_min_id',type=float,default=[0.35],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')
 parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
+
 args = parser.parse_args()
 
 out_dir = '/'.join(args.out_file.split('/')[:-1])+'/'
@@ -253,17 +253,75 @@ for g,scoper_group in vhh.groupby(by='scoper_group'):
         del scoper_group['mmseqs_id']
             
 print(f'Finished individual clusterings.', flush=True)
+
+#defragment by copying df
+vhh = vhh.copy()
+      
+#############
+## filter individual clusterings
+#############
+
+id_cols = [col for col in vhh.columns if 'clone_id' in col]
+#skip filtering if filter is set to 0
+if args.score_cutoff > 0:
     
+    #calculate base score using simple mmseqs clustering
+    #make input file
+    with open(f'{tmp_dir}/mmseqs_in.fasta','w') as f:
+        for i,row in vhh.iterrows():
+            f.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
+    
+    #run mmseqs clustering
+    result = subprocess.run(['/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs', 'easy-cluster',
+                            f'{tmp_dir}/mmseqs_in.fasta', f'{tmp_dir}/mmseqs_out', f'{tmp_dir}/tmp',
+                             '-s', '5', #sensitivity set to max
+                             '-c', '0.75', #set this lower than seq-id cutoff so it doesn't have an impact
+                             '--min-seq-id', '0.9', #only cluster seqs more similar than user input
+                             '-e', 'inf', #max e-value to be clustered (set to keep all)
+                             '-v', '1', #verbosity
+                             '--cluster-steps', '3', #use faster cascaded clustering method
+                             '--seq-id-mode', '0', #use alignment length to normalize
+                             '--cluster-mode', '0', #use greedy setcover algorithm
+                             '--alignment-mode', '3', #get percent identity, rather than alignment score
+                             '--max-seqs', '300', #get top 300 matches to each query
+                             '--gap-open', '20', #set high gap-opening penalty to prevent excessive gaps
+                             '--gap-extend', '3',#set high gap-extend penalty to prevent excessive gaps
+                             '--similarity-type', '2', #use sequence identity, not score
+                             '--threads', str(ncpus)]) #how many cpus to use
+    assert result.returncode == 0
+    
+    #read in clusters
+    mmseqs_clusters = pd.read_csv(f'{tmp_dir}/mmseqs_out_cluster.tsv',names=['mmseqs_id','sequence_id'],sep='\t')
+    print(f'{len(vhh)} rows before simple mmseqs merge.',flush=True)
+    vhh = vhh.merge(mmseqs_clusters,on='sequence_id',how='outer')
+    print(f'{len(vhh)} rows after simple mmseqs merge.',flush=True)
+    
+    #get scores
+    base_scores = []
+    for g,group in vhh.groupby('mmseqs_id'):
+        base_scores.append(cluster_ratio_score(group['CDR3'].unique(),args.dist_cutoff,pool))
+    base_score = np.mean(base_scores)
+    print(f'Base: {base_score}',flush=True)
+    
+    keep_cols = []
+    for col in tqdm(id_cols):
+        scores = []
+        for g,group in vhh.groupby(col):
+            scores.append(cluster_ratio_score(group['CDR3'].unique(),args.dist_cutoff,pool))
+        #keep columns that pass the cutoff
+        if np.mean(scores) > base_score*args.score_factor:
+            keep_cols.append(col)
+        print(f'Score: {col}, {np.mean(scores)}',flush=True)
+else:
+    keep_cols = id_cols
+print(f'{len(keep_cols)} of {len(id_cols)} clusterings pass the score cutoff ({base_score*args.score_factor}).',flush=True)
+      
 #############
 ## meta clustering
 #############
 
-#defragment by copying df
-vhh = vhh.copy()
-
 #group all VHHs that are always clustered together
-id_cols = [col for col in vhh.columns if 'clone_id' in col]
-for i,(g,group) in enumerate(vhh.groupby(by=id_cols)):
+for i,(g,group) in enumerate(vhh.groupby(by=keep_cols)):
     vhh.loc[group.index,'fine_clone_id'] = i
 print(f'{len(vhh["fine_clone_id"].unique())} tight clusters found.',flush=True)
 
@@ -274,7 +332,7 @@ print(f'{len(vhh["fine_clone_id"].unique())} tight clusters found.',flush=True)
 group_reps = vhh.drop_duplicates('fine_clone_id')
 #run clustering
 for method in args.meta_method:
-    links = linkage(group_reps[id_cols].values,method=method,metric='hamming')
+    links = linkage(group_reps[keep_cols].values,method=method,metric='hamming')
     for min_id in tqdm(args.meta_min_id):
         labels = fcluster(links,criterion='distance',t=1-min_id)
         group_reps.loc[:,f'meta_clone_id_{method}_{min_id}'] = labels

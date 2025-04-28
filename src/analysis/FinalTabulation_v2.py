@@ -12,7 +12,7 @@ import argparse
 from scipy.cluster.hierarchy import linkage, fcluster, leaves_list
 from multiprocessing import Pool
 
-sys.path.append('/cluster/tufts/cowenlab/wwhite06/vhh/scripts/')
+sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
 
 #get user inputs
@@ -23,6 +23,8 @@ parser.add_argument('--GS_file',type=str,help='The file that has the family and 
 parser.add_argument('--suffix',type=str,default='',help='Additional suffix for output csv files.')
 parser.add_argument('--sample_file',type=str,help='The csv file containig the names and file paths for all samples to be analyzed.')
 parser.add_argument('--pair_file',type=str,help='The csv file denoting which gorups of samples should be compared to each other for enrichment analysis.')
+parser.add_argument('--seq_col',type=str,default='VHH',help='The column name to use for identifying unique sequences.')
+parser.add_argument('--fam_col',type=str,default='clone_id',help='The column name to use for identifying families of sequences.')
 parser.add_argument('--preseq_dir',type=str,default='',help='The folder to store the preseq analysis results in if requested.')
 parser.add_argument('--dendr_min_count',type=int,default= -1,help='The minimum number of reads in each experiment needed to be included in dendrogramming analysis.')
 parser.add_argument('--dendr_linkage',type=str,default='average',help='The linkage type to use when creating the dendrogram order (complete, single, or average).')
@@ -57,11 +59,11 @@ print('Samples to load:')
 print(sample_df)
     
 #get global set with cluster info
-global_set = pd.read_csv(GS_file,index_col=0,dtype={'clone_id':str})
+global_set = pd.read_csv(GS_file,index_col=0,dtype={args.fam_col:str})
 
 #make sure clone_id is a string not a numeric
 #otherwise, for some reason sometimes the same id can be read in as a string or an int
-global_set['clone_id'] = global_set['clone_id'].astype(str)
+global_set[args.fam_col] = global_set[args.fam_col].astype(str)
 
 #merge on individual experiment counts
 for i,row in tqdm(sample_df.iterrows()):
@@ -104,8 +106,8 @@ for c in global_set.columns:
     else:
         agg_funcs[c] = np.sum
 
-vhh = aggregate_and_calculate_fc(global_set,agg_funcs,'VHH',pair_df,args.gfold_quant,pool)
-fam = aggregate_and_calculate_fc(global_set,agg_funcs,'clone_id',pair_df,args.gfold_quant,pool)
+vhh = aggregate_and_calculate_fc(global_set,agg_funcs,args.seq_col,pair_df,args.gfold_quant,pool)
+fam = aggregate_and_calculate_fc(global_set,agg_funcs,args.fam_col,pair_df,args.gfold_quant,pool)
 
 ####################
 # run dendrogramming if requested
@@ -127,7 +129,7 @@ if args.dendr_min_count >= 0:
         fasta_name = f'tmp/fasta/{pair_row["name"]}.fasta'
         with open(fasta_name,'w') as f:
             for ii,sub_row in subset.iterrows():
-                f.write(f">{sub_row['clone_id']}\n{sub_row['VHH']}\n") #Index here is the intermediate_id
+                f.write(f">{sub_row[args.fam_col]}\n{sub_row[args.seq_col]}\n") #Index here is the intermediate_id
                 
         #run mmseqs search/alignment
         dist_name = f'tmp/dist/{pair_row["name"]}_dists.tsv'
@@ -152,7 +154,7 @@ if args.dendr_min_count >= 0:
         dists = dists.pivot(index='query',columns='target',values='pident')
         print(f'{np.sum(np.isnan(dists.values))} missing distances of {len(subset)**2} total.',flush=True)
         #re-order to be consistent, convert to numpy array, convert from identity to dist
-        dists = 1 - dists.loc[subset['clone_id'],subset['clone_id']].values
+        dists = 1 - dists.loc[subset[args.fam_col],subset[args.fam_col]].values
         
         #get just upper triangular values for clustering
         dists = dists[np.triu_indices(dists.shape[0],k=1)]
@@ -165,10 +167,10 @@ if args.dendr_min_count >= 0:
         leaf_idx = leaves_list(links)
 
         #convert to df for merging
-        labels = pd.DataFrame({'clone_id':subset['clone_id'], f'dendr_{pair_row["name"]}':leaf_idx})
+        labels = pd.DataFrame({args.fam_col:subset[args.fam_col], f'dendr_{pair_row["name"]}':leaf_idx})
         
         #merge labels onto main family df (will leave NaN values for families not passing cutoff)
-        fam = fam.merge(labels,on='clone_id',how='left')
+        fam = fam.merge(labels,on=args.fam_col,how='left')
     
     subprocess.run(['rm', '-r', 'tmp'])
 
@@ -193,7 +195,7 @@ if args.preseq_dir != '':
     os.mkdir(f'{args.preseq_dir}/tmp')
     with open(f'{args.preseq_dir}/tmp/mmseqs_db.fasta', 'w') as f:
         for i,row in vhh.iterrows():
-            f.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
+            f.write(f'>{row["sequence_id"]}\n{row[args.seq_col]}\n')
     
     print('Running VHH-level preseq.',flush=True)
     run_preseq_assembly(data=global_set,
@@ -202,6 +204,8 @@ if args.preseq_dir != '':
                         out_dir=args.preseq_dir,
                         kind='vhh',
                         pool=pool,
+                        seq_col=args.seq_col,
+                        fam_col=args.fam_col,
                         start_seq=args.start_seq,
                         end_seq=args.end_seq,
                         max_start_scan=args.max_start_scan,
@@ -219,6 +223,8 @@ if args.preseq_dir != '':
                         out_dir=args.preseq_dir,
                         kind='fam',
                         pool=pool,
+                        seq_col=args.seq_col,
+                        fam_col=args.fam_col,
                         start_seq=args.start_seq,
                         end_seq=args.end_seq,
                         max_start_scan=args.max_start_scan,

@@ -16,7 +16,7 @@ from glob import glob
 from Levenshtein import distance
 from tqdm import tqdm
 
-sys.path.append('/cluster/tufts/cowenlab/wwhite06/vhh/scripts/')
+sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
 
 mmseqs_path = "/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs" #note that this is Ned's mmseqs because of version issues

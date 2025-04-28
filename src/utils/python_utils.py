@@ -329,6 +329,7 @@ def run_preseq(data,pair_df,out_dir,suffix):
             print(f'{name}_curve preseq failed!')
 
 def run_preseq_assembly(data,sample_df,pair_df,out_dir,kind,pool,
+                        seq_col,fam_col,
                         start_seq,end_seq,max_start_scan,max_end_scan,min_start_match,min_end_match,
                         tmp_dir,mmseqs_db,min_seq_id):
     
@@ -345,7 +346,7 @@ def run_preseq_assembly(data,sample_df,pair_df,out_dir,kind,pool,
         #get names of files to load
         fnames = [sample_df.loc[sample_df['name']==col,'file'].tolist()[0] for col in columns]
         #merge unfiltered count data onto main data
-        count_info = data[['sequence_id','sequence','VHH','clone_id']].copy()
+        count_info = data[['sequence_id','sequence',seq_col,fam_col]].copy()
         for file in fnames:
             new_df = pd.read_csv(file,sep='\t')[['sequence','duplicate_count']]
             count_info = count_info.merge(new_df,on='sequence',how='outer',suffixes=['',file.split('/')[-1].split('_')[0]])
@@ -354,41 +355,41 @@ def run_preseq_assembly(data,sample_df,pair_df,out_dir,kind,pool,
         count_info['total'] = count_info[count_cols].sum(axis=1)
         
         #get translations of sequences without translation
-        missing_locs = count_info['VHH'].map(lambda x: type(x)!=str)
+        missing_locs = count_info[seq_col].map(lambda x: type(x)!=str)
         print(columns, missing_locs.sum(), len(count_info), flush=True)
         dna_seqs = count_info.loc[missing_locs,'sequence']
         aa_df = pd.DataFrame(pool.starmap(translate_VHH_end_scan,
                                           [(seq, start_seq, end_seq, max_start_scan, max_end_scan) for seq in dna_seqs],
                                           chunksize=5000),
-                            columns=['sequence','VHH','start_match','start_i','start_f','end_match','end_i'])
+                            columns=['sequence',seq_col,'start_match','start_i','start_f','end_match','end_i'])
         #find and label bad seqs
-        has_stop = aa_df['VHH'].map(lambda x: '*' in x)
+        has_stop = aa_df[seq_col].map(lambda x: '*' in x)
         bad_start = aa_df['start_match'] < min_start_match
         bad_end = aa_df['end_match'] < min_end_match
         bad_seq = has_stop|bad_start|bad_end
-        aa_df.loc[bad_seq,'VHH'] = ''
+        aa_df.loc[bad_seq,seq_col] = ''
         
         #fill in missing translations
-        count_info.loc[missing_locs,'VHH'] = aa_df['VHH'].values
+        count_info.loc[missing_locs,seq_col] = aa_df[seq_col].values
         #remove failed translations
-        count_info = count_info.loc[count_info['VHH']!='',:]
+        count_info = count_info.loc[count_info[seq_col]!='',:]
         
         #aggregate by vhh
         agg_funcs = {
             'sequence_id':lambda x: x.iloc[0],
-            'clone_id':lambda x: x.iloc[0],
+            fam_col:lambda x: x.iloc[0],
             'total':np.sum,
         }
-        count_info = count_info[['sequence_id','clone_id','VHH','total']].groupby(by='VHH',sort=False).aggregate(agg_funcs)
+        count_info = count_info[['sequence_id',fam_col,seq_col,'total']].groupby(by=seq_col,sort=False).aggregate(agg_funcs)
         #bring back VHH as a column instead of index
         count_info = count_info.reset_index()
-        count_info.rename({'index':'VHH'})
+        count_info.rename({'index':seq_col})
         
         #find families if necessary
         if kind == 'fam':
             
             #need to aldo fill in missing fam info
-            missing_fams = count_info['clone_id'].map(lambda x: type(x)!=str)
+            missing_fams = count_info[fam_col].map(lambda x: type(x)!=str)
             print(missing_fams.sum(),flush=True)
             
             #add seq_ids to missing rows
@@ -397,7 +398,7 @@ def run_preseq_assembly(data,sample_df,pair_df,out_dir,kind,pool,
             #write mmseqs input fasta
             with open(f'{tmp_dir}/tmp_mmseqs_query.fasta','w') as f:
                 for i,row in count_info.loc[missing_fams,:].iterrows():
-                    f.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
+                    f.write(f'>{row["sequence_id"]}\n{row[seq_col]}\n')
                     
             #run mmseqs to find closest family
             result = subprocess.run(['/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs',
@@ -415,11 +416,11 @@ def run_preseq_assembly(data,sample_df,pair_df,out_dir,kind,pool,
             for seq_id,group in mmseqs_df.groupby('query'):
                 best_idx = group['pident'].idxmax()
                 if group.loc[best_idx,'pident'] >= min_seq_id: #close enough match
-                    match_id = count_info.loc[count_info['sequence_id']==group.loc[best_idx,'target'],'clone_id'] #get family of best match
+                    match_id = count_info.loc[count_info['sequence_id']==group.loc[best_idx,'target'],fam_col] #get family of best match
                     assert len(match_id) == 1
-                    count_info.loc[count_info['sequence_id']==seq_id,'clone_id'] = match_id #set clone_id of the query sequence 
+                    count_info.loc[count_info['sequence_id']==seq_id,fam_col] = match_id #set clone_id of the query sequence 
                 else: #not a good match to any family
-                    count_info.loc[count_info['sequence_id']==seq_id,'clone_id'] = f'N-{fam_idx}' #give new clone_id
+                    count_info.loc[count_info['sequence_id']==seq_id,fam_col] = f'N-{fam_idx}' #give new clone_id
                     fam_idx += 1 #increment new clone_id counter
                     
             #aggregate by family

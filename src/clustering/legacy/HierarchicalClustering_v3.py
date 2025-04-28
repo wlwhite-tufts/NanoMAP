@@ -15,7 +15,7 @@ from tqdm import tqdm
 import argparse
 from multiprocessing import Pool
 
-sys.path.append('/cluster/tufts/cowenlab/wwhite06/vhh/scripts/')
+sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
 
 #get user inputs

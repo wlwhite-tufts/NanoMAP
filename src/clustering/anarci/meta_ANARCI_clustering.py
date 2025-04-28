@@ -17,7 +17,7 @@ import itertools
 from collections import defaultdict
 from scipy.cluster.hierarchy import linkage, fcluster
 
-sys.path.append('/cluster/tufts/cowenlab/wwhite06/vhh/scripts/')
+sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
 
 #get user inputs

@@ -12,7 +12,7 @@ import itertools
 from collections import defaultdict
 from scipy.cluster.hierarchy import linkage, fcluster
 
-sys.path.append('/cluster/tufts/cowenlab/wwhite06/vhh/scripts/')
+sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
 
 #get user inputs
@@ -51,7 +51,7 @@ parser.add_argument('--linkage',type=str,default=['single','average','complete']
 parser.add_argument('--weighted_min_id',type=float,nargs=2,default=[0.3,0.7],help='Inclusinve bounds for the range of distance cutoff values to use in the weighted hierarchical clustering step.')
 parser.add_argument('--weighted_min_id_N',type=int,default=3,help='Number of values to test between the weighted_min_id bounds.')
 
-parser.add_argument('--score_factor',type=float,default=1.6,help='Keep individual clusterings above this factor times the score of a basic mmseqs clustering. Only kept clusterings are used to use in metaclustering.')
+parser.add_argument('--score_fraction',type=float,default=0.5,help='Keep the top score_fraction of individual clusterings. Only these clusterings are used in metaclustering.')
 parser.add_argument('--dist_cutoff',type=float,default=0.4,help='CDR3 distance cutoff to use for determining if a pair of sequences within a cluster matches closely enough when scoring.')
 
 parser.add_argument('--meta_min_id',type=float,default=[0.35],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')
@@ -263,58 +263,26 @@ vhh = vhh.copy()
 
 id_cols = [col for col in vhh.columns if 'clone_id' in col]
 #skip filtering if filter is set to 0
-if args.score_cutoff > 0:
+if args.score_fraction < 1:
     
-    #calculate base score using simple mmseqs clustering
-    #make input file
-    with open(f'{tmp_dir}/mmseqs_in.fasta','w') as f:
-        for i,row in vhh.iterrows():
-            f.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
-    
-    #run mmseqs clustering
-    result = subprocess.run(['/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs', 'easy-cluster',
-                            f'{tmp_dir}/mmseqs_in.fasta', f'{tmp_dir}/mmseqs_out', f'{tmp_dir}/tmp',
-                             '-s', '5', #sensitivity set to max
-                             '-c', '0.75', #set this lower than seq-id cutoff so it doesn't have an impact
-                             '--min-seq-id', '0.9', #only cluster seqs more similar than user input
-                             '-e', 'inf', #max e-value to be clustered (set to keep all)
-                             '-v', '1', #verbosity
-                             '--cluster-steps', '3', #use faster cascaded clustering method
-                             '--seq-id-mode', '0', #use alignment length to normalize
-                             '--cluster-mode', '0', #use greedy setcover algorithm
-                             '--alignment-mode', '3', #get percent identity, rather than alignment score
-                             '--max-seqs', '300', #get top 300 matches to each query
-                             '--gap-open', '20', #set high gap-opening penalty to prevent excessive gaps
-                             '--gap-extend', '3',#set high gap-extend penalty to prevent excessive gaps
-                             '--similarity-type', '2', #use sequence identity, not score
-                             '--threads', str(ncpus)]) #how many cpus to use
-    assert result.returncode == 0
-    
-    #read in clusters
-    mmseqs_clusters = pd.read_csv(f'{tmp_dir}/mmseqs_out_cluster.tsv',names=['mmseqs_id','sequence_id'],sep='\t')
-    print(f'{len(vhh)} rows before simple mmseqs merge.',flush=True)
-    vhh = vhh.merge(mmseqs_clusters,on='sequence_id',how='outer')
-    print(f'{len(vhh)} rows after simple mmseqs merge.',flush=True)
-    
-    #get scores
-    base_scores = []
-    for g,group in vhh.groupby('mmseqs_id'):
-        base_scores.append(cluster_ratio_score(group['CDR3'].unique(),args.dist_cutoff,pool))
-    base_score = np.mean(base_scores)
-    print(f'Base: {base_score}',flush=True)
-    
-    keep_cols = []
+    scores_df = []
     for col in tqdm(id_cols):
-        scores = []
+        col_scores = []
         for g,group in vhh.groupby(col):
-            scores.append(cluster_ratio_score(group['CDR3'].unique(),args.dist_cutoff,pool))
-        #keep columns that pass the cutoff
-        if np.mean(scores) > base_score*args.score_factor:
-            keep_cols.append(col)
-        print(f'Score: {col}, {np.mean(scores)}',flush=True)
+            col_scores.append(cluster_ratio_score(group['CDR3'].unique(),args.dist_cutoff,pool))
+        s = np.mean(col_scores)
+        scores_df.append([col,s])
+        print(f'Score: {col}, {s}',flush=True)
+        
+    scores_df = pd.DataFrame(scores_df,columns=['column','score'])
+    scores_df = scores_df.sort_values(by='score',ascending=False)
+    N_keep = int(len(scores_df)*args.score_fraction)
+    scores_df = scores_df.head(N_keep)
+    keep_cols = scores_df['column'].tolist()
+    print(f'{len(keep_cols)} of {len(id_cols)} clusterings pass the score cutoff ({scores_df["score"].values[-1]}).',flush=True)
 else:
     keep_cols = id_cols
-print(f'{len(keep_cols)} of {len(id_cols)} clusterings pass the score cutoff ({base_score*args.score_factor}).',flush=True)
+    print(f'All clusterings pass the score cutoff.',flush=True)
       
 #############
 ## meta clustering

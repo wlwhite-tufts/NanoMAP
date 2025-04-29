@@ -730,7 +730,7 @@ def add_header(df, header_names, sample_df):
     df.columns = pd.MultiIndex.from_tuples(header,names=header_names+['full_name'])
     return df
 
-    def norm_dist(seq1,seq2):
+def norm_dist(seq1,seq2):
     return distance(seq1,seq2)/max(len(seq1),len(seq2))
                         
 def cluster_ratio_score(seqs,max_diff,pool):

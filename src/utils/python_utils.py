@@ -730,4 +730,15 @@ def add_header(df, header_names, sample_df):
     df.columns = pd.MultiIndex.from_tuples(header,names=header_names+['full_name'])
     return df
 
+    def norm_dist(seq1,seq2):
+    return distance(seq1,seq2)/max(len(seq1),len(seq2))
+                        
+def cluster_ratio_score(seqs,max_diff,pool):
+    if len(seqs) == 1:
+        return 0
     
+    dists = np.array(pool.starmap(norm_dist,((s1,s2) for i,s1 in enumerate(seqs[:-1]) for s2 in seqs[i+1:]),chunksize=1000))
+    tot_good = np.sum(dists<=max_diff)
+    tot_bad = np.sum(dists>max_diff)
+        
+    return tot_good/(tot_bad+1)

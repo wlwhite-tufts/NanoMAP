@@ -184,8 +184,8 @@ if len(args.header):
     fam = add_header(fam, args.header, sample_df)
 
 base_name = GS_file.replace('_final_clusters','').replace('_clust','').replace('.csv','')
-vhh.to_csv(f'{base_name}_{args.suffix}_gfold_vhh.csv'),index=len(args.header)>0)
-fam.to_csv(f'{base_name}_{args.suffix}_gfold_fam.csv'),index=len(args.header)>0)
+vhh.to_csv(f'{base_name}{args.suffix}_gfold_vhh.csv',index=len(args.header)>0)
+fam.to_csv(f'{base_name}{args.suffix}_gfold_fam.csv',index=len(args.header)>0)
 
 ####################
 # run preseq if requested

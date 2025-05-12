@@ -242,6 +242,7 @@ for g,scoper_group in vhh.groupby(by='scoper_group'):
                         
                         #merge labels onto group info
                         vhh.loc[mmseqs_group.index,f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'] = labels
+                        # print(f'Test: {(vhh.loc[mmseqs_group.index,"sequence_id"]==mmseqs_group["sequence_id"]).sum()}, {len(mmseqs_group)}, {len(vhh.loc[mmseqs_group.index,:])}',flush=True)
             
                 #update min_id for all clustering variations
                 for clust_idx,_ in enumerate(weighted_clustering_combos):
@@ -256,6 +257,7 @@ print(f'Finished individual clusterings.', flush=True)
 
 #defragment by copying df
 vhh = vhh.copy()
+vhh.to_csv(f'{tmp_dir}/intermediate.csv')
       
 #############
 ## filter individual clusterings

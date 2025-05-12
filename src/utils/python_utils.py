@@ -608,6 +608,8 @@ def weighted_anarci_dist_index(idx1,idx2,df,weight_scheme,max_len_diffs):
 
 def recursive_mmseqs_split(group, max_group_size, min_id, id_step, tmp_dir, ncpus):
     
+    group_index = group.index.copy()
+    
     #base case (if smaller than max allowed)
     if len(group) <= max_group_size:
         group['mmseqs_id'] = group['sequence_id'].values[0] #arbitrarily use first one
@@ -644,7 +646,8 @@ def recursive_mmseqs_split(group, max_group_size, min_id, id_step, tmp_dir, ncpu
         
         #remove old clusters and add new ones
         group = group.drop(columns=['mmseqs_id'],errors='ignore')
-        group = group.merge(mmseqs_clusters,on='sequence_id',how='outer').set_index(group.index) #this preserves the original index
+        group = group.merge(mmseqs_clusters,on='sequence_id',how='left')
+        group.index = group_index #this preserves the original index
         
         #clean up
         for f in glob(f'{tmp_dir}/*'):

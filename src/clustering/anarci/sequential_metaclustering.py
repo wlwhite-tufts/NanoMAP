@@ -11,6 +11,8 @@ import argparse
 import itertools
 from collections import defaultdict
 from scipy.cluster.hierarchy import linkage, fcluster
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/')
 from utils.python_utils import *
@@ -58,14 +60,58 @@ parser.add_argument('--meta_min_id',type=float,default=[0.45],nargs='*',help='Mi
 parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
 
 #linking args
+parser.add_argument('--min_link_id',type=float,default=0.9,help='Minimum fractional identity required to link a sequence from one group to the previously clustered sequences.')
+parser.add_argument('--figure_file',type='str',default='',help='File name prefix for saving nearest neighbor distance distributions for each linking step. Files are not saved if figure_file is blank.')
 
+def find_closest_match(query_df,target_df,tmp_dir,args):
+    #write temp fasta files
+    with open(f'{tmp_dir}tmp_mmseqs_query.fasta','w') as f:
+        for i,row in query_df.iterrows():
+            f.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
+    
+    with open(f'{tmp_dir}tmp_mmseqs_target.fasta','w') as f:
+        for i,row in target_df.iterrows():
+            f.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
+            
+    #run mmseqs to find closest family
+    result = subprocess.run(['/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs',
+                             'easy-search', f'{tmp_dir}/tmp_mmseqs_query.fasta', mmseqs_db, f'{tmp_dir}/mmseqs_results', tmp_dir,
+                             '-s', '7.5', #sensitivity
+                             '-c', '0', #don't filter on coverage
+                             '-min-seq-id', '0', #don't filtre here because we want to have full distribution info
+                             '--local-tmp', tmp_dir,
+                             '--format-output', 'query,target,pident',
+                             '--max-seq-id','1.0', #do not do any redundancy filtering
+                             '--max-seqs', '1', #look at best seq for each query
+                             '-v', '0'])
+    assert result.returncode == 0
+                    
+    mmseqs_df = pd.read_csv(f'{tmp_dir}/mmseqs_results',names=['query','target','pident'],sep='\t')
+    
+    if len(args.figure_file):
+        plt.figure(figsize=[8,8])
+        sns.histplot(mmseqs_df['pident'],bins=np.)
 
+if __name__ == '__main__':
+    args = parser.parse_args()
+    
+    #set up for parallelization
+    ncpus = int(os.environ['SLURM_JOB_CPUS_PER_NODE'])
+    pool = Pool(processes=ncpus)
+    print(f'Connected to pool with {ncpus} cpus.',flush=True)
+    
+    #make tmp_dir
+    out_dir = '/'.join(args.out_file.split('/')[:-1])+'/'
+    out_fname = args.out_file.split('/')[-1]
+    tmp_dir = f'{out_dir}tmp/'
 
+    file_groups = [line.split(',') for line in open(args.in_file_list,'r').readlines()]
 
+    #cluster the first group from scratch
+    data = collect_seqs(file_groups[0]) #get sequence info from user-specificed folder
+    data,vhh = annotate_and_filter_seqs(args,data,pool) #get translations, CDR anotations, and filter out bad/singleton sequences
+    vhh,_,_ = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
 
-
-
-
-
+    
 
 

@@ -113,15 +113,43 @@ if __name__ == '__main__':
     tmp_dir = f'{out_dir}tmp/'
 
     file_groups = [line.split(',') for line in open(args.in_file_list,'r').readlines()]
+    
+    #get basic info for all seqs
+    data = []
+    for i,group in enumerate(file_groups):
+        group_df = collect_seqs(group)
+        group_df[f'group{i}'] = True
+        data.append(group_df)
 
     #cluster the first group from scratch
     data = collect_seqs(file_groups[0]) #get sequence info from user-specificed folder
     data,vhh = annotate_and_filter_seqs(args,data,pool) #get translations, CDR anotations, and filter out bad/singleton sequences
     vhh,_,meta_id_cols = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
-
+    data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+meta_id_cols],on='VHH',how='outer') #merge cluster labels and other info onto data
+    
     #add the rest of the groups in one at a time
-    for group in file_groups[1]:
+    for i,group in enumerate(file_groups[1:]):
         
-        new_data = 
-
-
+        #get sequences for this group
+        new_data = collect_seqs(group) #get sequence info from user-specificed folder
+        new_data,new_vhh = annotate_and_filter_seqs(args,new_data,pool) #get translations, CDR anotations, and filter out bad/singleton sequences
+        new_data = new_data.merge(new_vhh[['VHH','CDR1','CDR2','CDR3','ANARCI_success']],on='VHH',how='outer') #get anarci info into data
+        
+        #find new sequences
+        old_seqs = set(data['sequence'].tolist()) #get old seqs
+        new_data = new_data[new_data['sequence'].map(x not in old_seqs)] #keep only seqs not in old_seqs
+        
+        # create figure file name if requested
+        if len(args.figure_file):
+            fig_file = f'{args.figure_file}_{i+1}.png'
+        else:
+            fig_file = ''
+        #find matches for new sequences
+        matches = find_closest_match(new_data,old_data,tmp_dir,f'{args.figure_file}_{i+1}.png')
+        
+        
+        
+        
+        
+        
+        

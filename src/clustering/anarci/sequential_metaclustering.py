@@ -63,7 +63,7 @@ parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='
 parser.add_argument('--min_link_id',type=float,default=0.9,help='Minimum fractional identity required to link a sequence from one group to the previously clustered sequences.')
 parser.add_argument('--figure_file',type='str',default='',help='File name prefix for saving nearest neighbor distance distributions for each linking step. Files are not saved if figure_file is blank.')
 
-def find_closest_match(query_df,target_df,tmp_dir,args):
+def find_closest_match(query_df,target_df,tmp_dir,figure_fname):
     #write temp fasta files
     with open(f'{tmp_dir}tmp_mmseqs_query.fasta','w') as f:
         for i,row in query_df.iterrows():
@@ -88,9 +88,16 @@ def find_closest_match(query_df,target_df,tmp_dir,args):
                     
     mmseqs_df = pd.read_csv(f'{tmp_dir}/mmseqs_results',names=['query','target','pident'],sep='\t')
     
-    if len(args.figure_file):
+    if len(figure_fname):
         plt.figure(figsize=[8,8])
-        sns.histplot(mmseqs_df['pident'],bins=np.)
+        sns.histplot(mmseqs_df['pident'],bins=np.linspace(0,100,len(mmseqs_df)/50))
+        plt.xlabel('Identity to Closest Match',fontsize=24)
+        plt.ylabel('Number of Sequences',fontsize=24)
+        plt.savefig(figure_fname,dpi=300,bbox_inches='tight')
+        
+    subprocess.run(['rm', f'tmp_dir/*'])
+        
+    return mmseqs_df
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -110,8 +117,11 @@ if __name__ == '__main__':
     #cluster the first group from scratch
     data = collect_seqs(file_groups[0]) #get sequence info from user-specificed folder
     data,vhh = annotate_and_filter_seqs(args,data,pool) #get translations, CDR anotations, and filter out bad/singleton sequences
-    vhh,_,_ = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
+    vhh,_,meta_id_cols = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
 
-    
+    #add the rest of the groups in one at a time
+    for group in file_groups[1]:
+        
+        new_data = 
 
 

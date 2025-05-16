@@ -335,9 +335,9 @@ if __name__ == '__main__':
     #add clustering results to main dataframe
     print(f'{len(data)} sequences before merge.',flush=True)
     if args.keep_intermediates:
-        data = data.merge(vhh[['VHH',"v_call", "d_call", "j_call",'CDR1','CDR2','CDR3']+id_cols+meta_id_cols],on='VHH',how='outer')
+        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+id_cols+meta_id_cols],on='VHH',how='outer')
     else:
-        data = data.merge(vhh[['VHH',"v_call", "d_call", "j_call",'CDR1','CDR2','CDR3']+meta_id_cols],on='VHH',how='outer')
+        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+meta_id_cols],on='VHH',how='outer')
     print(f'{len(data)} sequences after merge.',flush=True)
     data.to_csv(args.out_file)
     

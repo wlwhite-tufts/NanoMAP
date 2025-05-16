@@ -68,17 +68,7 @@ def collect_seqs(files):
     print(f'{len(data)} rows in global set after loading tsvs.', flush=True)
     return data
 
-def annotate_and_filter_seqs(args,data,pool):
-    
-    #define functions for aggregation
-    agg_funcs = {}
-    for c in data.columns:
-        #take the first of each VHH group for descriptor columns
-        if c != 'duplicate_count':
-            agg_funcs[c] = lambda x: x.iloc[0]
-        #sum the duplicate count
-        else:
-            agg_funcs[c] = np.sum
+def annotate_and_filter_seqs(args,data,pool,agg_funcs):
     
     #aggregate based on sequence
     data = data.groupby(by='sequence',sort=False).aggregate(func=agg_funcs)
@@ -327,17 +317,27 @@ if __name__ == '__main__':
     if len(files) == 0:
         print("Can't find tsv files - looking one dir deeper.")
         files = glob(f'{args.in_dir}*/*db-pass.tsv')
+        
+    #define functions for aggregation
+    agg_funcs = {}
+    for c in data.columns:
+        #take the first of each VHH group for descriptor columns
+        if c != 'duplicate_count':
+            agg_funcs[c] = lambda x: x.iloc[0]
+        #sum the duplicate count
+        else:
+            agg_funcs[c] = np.sum
     
     data = collect_seqs(files) #get sequence info from user-specificed folder
-    data,vhh = annotate_and_filter_seqs(args,data,pool) #get translations, CDR anotations, and filter out bad/singleton sequences
+    data,vhh = annotate_and_filter_seqs(args,data,pool,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
     vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
     
     #add clustering results to main dataframe
     print(f'{len(data)} sequences before merge.',flush=True)
     if args.keep_intermediates:
-        data = data.merge(vhh[['VHH',"v_call", "d_call", "j_call",'CDR1','CDR2','CDR3']+id_cols+meta_id_cols],on='VHH',how='outer')
+        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+id_cols+meta_id_cols],on='VHH',how='outer')
     else:
-        data = data.merge(vhh[['VHH',"v_call", "d_call", "j_call",'CDR1','CDR2','CDR3']+meta_id_cols],on='VHH',how='outer')
+        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+meta_id_cols],on='VHH',how='outer')
     print(f'{len(data)} sequences after merge.',flush=True)
     data.to_csv(args.out_file)
     

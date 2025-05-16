@@ -72,7 +72,7 @@ for i,row in tqdm(sample_df.iterrows()):
     # print(tsv_data['duplicate_count'].sum(), flush=True)
     tsv_data = tsv_data.rename(columns={'duplicate_count':row['name']})
     # print(tsv_data[row['name']].sum(), flush=True)
-    
+
     global_set = global_set.merge(tsv_data,on='sequence',how='left')
     # print(global_set[row['name']].sum(), flush=True)
     global_set.loc[np.isnan(global_set[row['name']]),row['name']] = 0 #set NaNs to 0
@@ -83,7 +83,10 @@ for i,row in tqdm(sample_df.iterrows()):
 global_set = global_set.sort_values(by=['VHH_duplicate_count','duplicate_count'],ignore_index=True,ascending=False) #highest first
 
 #save global set with count info
-global_set.to_csv(GS_file.replace('_final_clusters',f'{args.suffix}_tabulated_seq').replace('_clust.csv',f'{args.suffix}_tabulated_seq.csv'),index=False)
+global_set.to_csv(GS_file.replace('_final_clusters',
+                                 f'{args.suffix}_tabulated_seq').replace('_clust.csv',
+                                                                        f'{args.suffix}_tabulated_seq.csv').replace('_metaclustering.csv',
+                                                                                                                   f'{args.suffix}_tabulated_seq.csv'),index=False)
         
 ####################
 # calculate fold changes based on VHH-aggregated or clone_id-aggregated data
@@ -183,9 +186,10 @@ if len(args.header):
     vhh = add_header(vhh, args.header, sample_df)
     fam = add_header(fam, args.header, sample_df)
 
-base_name = GS_file.replace('_final_clusters','').replace('_clust','').replace('.csv','')
-vhh.to_csv(f'{base_name}{args.suffix}_gfold_vhh.csv',index=len(args.header)>0)
-fam.to_csv(f'{base_name}{args.suffix}_gfold_fam.csv',index=len(args.header)>0)
+base_dir = '/'.join(GS_file.split('/')[:-1])
+base_name = GS_file.split('/')[-1].replace('_final_clusters','').replace('_clust','').replace('_metaclustering','').replace('.csv','')
+vhh.to_csv(f'{base_dir}/{base_name}{args.suffix}_gfold_vhh.csv',index=len(args.header)>0)
+fam.to_csv(f'{base_dir}/{base_name}{args.suffix}_gfold_fam.csv',index=len(args.header)>0)
 
 ####################
 # run preseq if requested

@@ -318,6 +318,8 @@ if __name__ == '__main__':
         print("Can't find tsv files - looking one dir deeper.")
         files = glob(f'{args.in_dir}*/*db-pass.tsv')
         
+    data = collect_seqs(files) #get sequence info from user-specificed folder
+        
     #define functions for aggregation
     agg_funcs = {}
     for c in data.columns:
@@ -328,14 +330,13 @@ if __name__ == '__main__':
         else:
             agg_funcs[c] = np.sum
     
-    data = collect_seqs(files) #get sequence info from user-specificed folder
     data,vhh = annotate_and_filter_seqs(args,data,pool,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
     vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
     
     #add clustering results to main dataframe
     print(f'{len(data)} sequences before merge.',flush=True)
     if args.keep_intermediates:
-        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+id_cols+meta_id_cols],on='VHH',how='outer')
+        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3','scoper_group']+id_cols+meta_id_cols],on='VHH',how='outer')
     else:
         data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+meta_id_cols],on='VHH',how='outer')
     print(f'{len(data)} sequences after merge.',flush=True)

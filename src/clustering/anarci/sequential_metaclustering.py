@@ -61,24 +61,26 @@ parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='
 
 #linking args
 parser.add_argument('--min_link_id',type=float,default=0.9,help='Minimum fractional identity required to link a sequence from one group to the previously clustered sequences.')
-parser.add_argument('--figure_file',type='str',default='',help='File name prefix for saving nearest neighbor distance distributions for each linking step. Files are not saved if figure_file is blank.')
+parser.add_argument('--figure_file',type=str,default='',help='File name prefix for saving nearest neighbor distance distributions for each linking step. Files are not saved if figure_file is blank.')
 
-def find_closest_match(query_df,target_df,tmp_dir,args):
+def find_closest_match(query_df,target_df,tmp_dir,figure_fname):
+    os.mkdir(tmp_dir)
+    
     #write temp fasta files
     with open(f'{tmp_dir}tmp_mmseqs_query.fasta','w') as f:
         for i,row in query_df.iterrows():
-            f.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
+            f.write(f'>{row.name}\n{row["VHH"]}\n')
     
     with open(f'{tmp_dir}tmp_mmseqs_target.fasta','w') as f:
         for i,row in target_df.iterrows():
-            f.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
+            f.write(f'>{row.name}\n{row["VHH"]}\n')
             
     #run mmseqs to find closest family
-    result = subprocess.run(['/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs',
-                             'easy-search', f'{tmp_dir}/tmp_mmseqs_query.fasta', mmseqs_db, f'{tmp_dir}/mmseqs_results', tmp_dir,
+    result = subprocess.run(['/cluster/tufts/biocontainers/tools/mmseqs2/17.b804f/bin/mmseqs',
+                             'easy-search', f'{tmp_dir}tmp_mmseqs_query.fasta', f'{tmp_dir}tmp_mmseqs_target.fasta', f'{tmp_dir}/mmseqs_results', tmp_dir,
                              '-s', '7.5', #sensitivity
                              '-c', '0', #don't filter on coverage
-                             '-min-seq-id', '0', #don't filtre here because we want to have full distribution info
+                             '--min-seq-id', '0', #don't filter here because we want to have full distribution info
                              '--local-tmp', tmp_dir,
                              '--format-output', 'query,target,pident',
                              '--max-seq-id','1.0', #do not do any redundancy filtering
@@ -88,9 +90,16 @@ def find_closest_match(query_df,target_df,tmp_dir,args):
                     
     mmseqs_df = pd.read_csv(f'{tmp_dir}/mmseqs_results',names=['query','target','pident'],sep='\t')
     
-    if len(args.figure_file):
+    if len(figure_fname):
         plt.figure(figsize=[8,8])
-        sns.histplot(mmseqs_df['pident'],bins=np.)
+        sns.histplot(mmseqs_df['pident'],bins=np.linspace(0,100,100))
+        plt.xlabel('Identity to Closest Match',fontsize=24)
+        plt.ylabel('Number of Sequences',fontsize=24)
+        plt.savefig(figure_fname,dpi=300,bbox_inches='tight')
+        
+    subprocess.run(['rm', '-r', tmp_dir])
+        
+    return mmseqs_df
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -105,13 +114,78 @@ if __name__ == '__main__':
     out_fname = args.out_file.split('/')[-1]
     tmp_dir = f'{out_dir}tmp/'
 
-    file_groups = [line.split(',') for line in open(args.in_file_list,'r').readlines()]
-
-    #cluster the first group from scratch
-    data = collect_seqs(file_groups[0]) #get sequence info from user-specificed folder
-    data,vhh = annotate_and_filter_seqs(args,data,pool) #get translations, CDR anotations, and filter out bad/singleton sequences
-    vhh,_,_ = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
-
+    file_groups = [line.strip().split(',') for line in open(args.in_file_list,'r').readlines()]
     
+    #get basic info for all seqs
+    data = []
+    for i,group in enumerate(file_groups):
+        group_df = collect_seqs(group)
+        group_df[f'group{i}'] = True
+        data.append(group_df)
+    data = pd.concat(data,axis=0,ignore_index=True)
 
+    #define functions for aggregation
+    agg_funcs = {}
+    for c in data.columns:
+        if c == 'duplicate_count':
+            agg_funcs[c] = np.sum #add up duplicate counts
+        elif 'group' in c: #take logical "any" for group labels
+            agg_funcs[c] = np.any
+        else: #take the first of each VHH group for descriptor columns
+            agg_funcs[c] = lambda x: x.iloc[0]
 
+    #get translations, CDR anotations, and filter out bad/singleton sequences across whole set
+    data,vhh = annotate_and_filter_seqs(args,data,pool,agg_funcs)
+    
+    #get clustering for first group
+    vhh_new,_,meta_id_cols = meta_ANARCI_clustering_alt(args,vhh[vhh['group0']].copy(),out_dir,out_fname,pool,ncpus)
+    vhh.loc[vhh['group0'],'sequential_clone_id'] = vhh_new[meta_id_cols[0]] #save cluster labels in main vhh df
+    
+    #set index to sequence_id so that it's easy to assign new labels
+    vhh = vhh.set_index('sequence_id')
+    
+    #cluster new members added in each group, one group at a time
+    for i in range(1,len(file_groups)):
+        
+        #find idxs that have already been taken care of
+        old_idx = vhh[[f'group{ii}' for ii in range(i)]].any(axis=1)
+        
+        #find idxs in this group but not any previous groups
+        new_idx = vhh[f'group{i}'] & ~old_idx
+        print(f'{new_idx.sum()} new sequences added at step {i}',flush=True)
+        
+        # create figure file name if requested
+        if len(args.figure_file):
+            fig_file = f'{args.figure_file}_{i+1}.png'
+        else:
+            fig_file = ''
+        
+        #find matches for new sequences
+        matches = find_closest_match(vhh[new_idx].copy(),vhh[old_idx].copy(),tmp_dir,f'{args.figure_file}_{i}.png')
+        
+        #split into good and bad matches, apply matched cluster labels
+        good_matches = matches.loc[matches['pident']>=args.min_link_id*100,:]
+        
+        vhh.loc[good_matches['query'],'sequential_clone_id'] = vhh.loc[good_matches['target'],'sequential_clone_id'].copy().tolist()
+        print(f'{len(good_matches)} of the new sequences added at step {i} have good matches (>= {args.min_link_id*100}%ID)',flush=True)
+        
+        #cluster any unmatched new sequences (mmseqs doesn't always give a result for everything, so we have to go back to the original list of new seqs)
+        unmatched = vhh[new_idx].drop(good_matches['query'],axis=0)
+        print(f'{len(unmatched)} sequences need to be clustered at step {i}.',flush=True)
+        unmatched,_,meta_id_cols = meta_ANARCI_clustering_alt(args,unmatched,out_dir,out_fname,pool,ncpus)
+        #note that index of unmatched gets reset in the clustering process
+        
+        #apply cluster labels to newly clustered sequences
+        min_clust = vhh['sequential_clone_id'].max() + 1
+        vhh.loc[unmatched['sequence_id'],'sequential_clone_id'] = unmatched[meta_id_cols[0]].to_numpy() + min_clust
+    
+    print(f'{len(vhh["sequential_clone_id"].unique())} families found after linking.',flush=True)
+    
+    #merge results back onto data
+    print(f'{len(data)} rows before merge.',flush=True)
+    data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3','sequential_clone_id']],on='VHH',how='outer')
+    print(f'{len(data)} rows after merge.',flush=True)
+        
+    #save results
+    data.to_csv(args.out_file)
+        

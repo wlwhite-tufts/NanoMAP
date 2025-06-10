@@ -401,7 +401,7 @@ def run_preseq_assembly(data,sample_df,pair_df,out_dir,kind,pool,
                     f.write(f'>{row["sequence_id"]}\n{row[seq_col]}\n')
                     
             #run mmseqs to find closest family
-            result = subprocess.run(['/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs',
+            result = subprocess.run(['/cluster/tufts/biocontainers/tools/mmseqs2/17.b804f/bin/mmseqs',
                                      'easy-search', f'{tmp_dir}/tmp_mmseqs_query.fasta', mmseqs_db, f'{tmp_dir}/mmseqs_results', tmp_dir,
                                      '-s', '6', #sensitivity
                                      '--local-tmp', tmp_dir,
@@ -623,7 +623,7 @@ def recursive_mmseqs_split(group, max_group_size, min_id, id_step, tmp_dir, ncpu
                 f.write(f">{row['sequence_id']}\n{row['VHH']}\n") #Index here is the intermediate_id
                 
         #run mmseqs clustering
-        result = subprocess.run(['/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs', 'easy-cluster',
+        result = subprocess.run(['/cluster/tufts/biocontainers/tools/mmseqs2/17.b804f/bin/mmseqs', 'easy-cluster',
                                 f'{tmp_dir}/mmseqs_in.fasta', f'{tmp_dir}/mmseqs_out', f'{tmp_dir}/tmp',
                                  '-s', '7.5', #sensitivity set to max
                                  '-c', str(max(0,(min_id - 0.2))), #set this lower than seq-id cutoff so it doesn't have an impact

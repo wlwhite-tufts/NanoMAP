@@ -96,7 +96,6 @@ def annotate_and_filter_seqs(args, data, pool):
     # Collect results into DataFrame
     seq_info = pd.DataFrame(list(results), columns=['sequence','VHH','start_match','start_i','start_f','end_match','end_i'])
 
-
     # Merge translation results into original dataframe
     data = data.merge(seq_info, on='sequence', how='inner')
 

@@ -15,7 +15,7 @@ from scipy.cluster.hierarchy import linkage, fcluster
 sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
 sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/clustering/')
-from meta_ANARCI_clustering_alt import collect_seqs, annotate_and_filter_seqs
+from meta_ANARCI_clustering_alt_edit import collect_seqs, annotate_and_filter_seqs
 
 #get user inputs
 parser = argparse.ArgumentParser(prog='Cluster Based on ANARCI alignment',
@@ -155,14 +155,23 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
                             # print(f'SCOPer: {g}, ({rec_idx},{cdr_idx},{clust_idx}): {min_id[(rec_idx,cdr_idx,clust_idx)]}, NaNs: {np.mean(np.isnan(labels))}',flush=True)
                             
                             #merge labels onto group info
-                            vhh.loc[mmseqs_group.index,f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'] = labels
+                            col_name = f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'
+                            
+                            # Initialize column if it doesn't exist
+                            if col_name not in vhh.columns:
+                                vhh[col_name] = np.nan
+                            
+                            # Map row and column positions for iloc
+                            row_pos = vhh.index.get_indexer(mmseqs_group.index)
+                            col_pos = vhh.columns.get_loc(col_name)
+                            
+                            # Assign using iloc for speed
+                            vhh.iloc[row_pos, col_pos] = labels
                             # print(f'Test: {(vhh.loc[mmseqs_group.index,"sequence_id"]==mmseqs_group["sequence_id"]).sum()}, {len(mmseqs_group)}, {len(vhh.loc[mmseqs_group.index,:])}',flush=True)
                 
                     #update min_id for all clustering variations
                     for clust_idx,_ in enumerate(weighted_clustering_combos):
                         min_id[(rec_idx,cdr_idx,clust_idx)] = vhh[f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'].max() + 1
-                 
-                vhh = vhh.copy() #do this to defragment after many column insertions
                 
             #delete mmseqs_id column so it can be re-used in the next mmseqs recursive split
             del scoper_group['mmseqs_id']
@@ -259,7 +268,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     
     #add results to vhh dataframe
     print(f'{len(vhh)} VHHs before merge.',flush=True)
-    vhh = vhh.merge(group_reps[['fine_clone_id']+meta_id_cols],on='fine_clone_id',how='outer')
+    vhh = vhh.merge(group_reps[['fine_clone_id']+meta_id_cols],on='fine_clone_id',how='left')
     print(f'{len(vhh)} VHHs after merge.',flush=True)
     
     vhh = vhh.astype(dtype={col:int for col in id_cols+meta_id_cols})
@@ -306,9 +315,9 @@ if __name__ == '__main__':
     #add clustering results to main dataframe
     print(f'{len(data)} sequences before merge.',flush=True)
     if args.keep_intermediates:
-        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3','scoper_group']+id_cols+meta_id_cols],on='VHH',how='outer')
+        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3','scoper_group']+id_cols+meta_id_cols],on='VHH',how='left')
     else:
-        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+meta_id_cols],on='VHH',how='outer')
+        data = data.merge(vhh[['VHH','CDR1','CDR2','CDR3']+meta_id_cols],on='VHH',how='left')
     print(f'{len(data)} sequences after merge.',flush=True)
     data.to_csv(args.out_file)
     

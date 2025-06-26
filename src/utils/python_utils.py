@@ -514,7 +514,10 @@ def translate_VHH_end_scan(dna,start_aa,end_aa,start_cap,end_cap):
             best_i_end = i
                     
     return dna, ''.join(best_aa), best_match_start, best_i_start, best_f, best_match_end, best_i_end
-            
+
+def translate_wrapper(args):
+    return translate_VHH_end_scan(*args)
+    
 def get_anarci_alignment(seq):
     
     sequences = [('id',seq)]

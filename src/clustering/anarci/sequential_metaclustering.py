@@ -39,6 +39,8 @@ parser.add_argument('--recursive_min_id_start',type=float,nargs=2,default=[0.5,0
 parser.add_argument('--recursive_min_id_start_N',type=int,default=5,help='Number of values to test between the recursive_min_id_start bounds.')
 parser.add_argument('--recursive_min_id_step',type=float,default=0.025,help='Step size value for minimum sequence identity incerment in each recursive layer.')
 
+parser.add_argument('--recursive_method',type=str,nargs='*',default=['setcover'],help='Method to use for clustering in the recursive mmseqs clustering (setcover or conncomp).')
+
 parser.add_argument('--CDR3_weight',type=float,nargs=2,default=[3,3], help='Inclusive bounds for the weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
 parser.add_argument('--CDR3_weight_N',type=int,default=1,help='Number of values to test between the CDR3_weight bounds.')
 
@@ -76,7 +78,7 @@ def find_closest_match(query_df,target_df,tmp_dir,figure_fname):
             f.write(f'>{row.name}\n{row["VHH"]}\n')
             
     #run mmseqs to find closest family
-    result = subprocess.run(['/cluster/tufts/biocontainers/tools/mmseqs2/17.b804f/bin/mmseqs',
+    result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
                              'easy-search', f'{tmp_dir}tmp_mmseqs_query.fasta', f'{tmp_dir}tmp_mmseqs_target.fasta', f'{tmp_dir}/mmseqs_results', tmp_dir,
                              '-s', '7.5', #sensitivity
                              '-c', '0', #don't filter on coverage
@@ -139,7 +141,10 @@ if __name__ == '__main__':
     
     #get clustering for first group
     vhh_new,_,meta_id_cols = meta_ANARCI_clustering_alt(args,vhh[vhh['group0']].copy(),out_dir,out_fname,pool,ncpus)
-    vhh.loc[vhh['group0'],'sequential_clone_id'] = vhh_new[meta_id_cols[0]] #save cluster labels in main vhh df
+    keep_cols = [col for col in vhh_new if ('clone_id' not in col) and (col != 'scoper_group')]
+    vhh_new = vhh_new[keep_cols+meta_id_cols] #remove unnecessary columns
+    vhh_new = vhh_new.rename(columns={f'meta_clone_id_{args.meta_method[0]}_{args.meta_min_id[0]}':'sequential_clone_id'}) #rename meta id col
+    vhh = pd.concat([vhh.loc[~vhh['group0'],:].copy(),vhh_new.copy()],axis=0,join='outer') #save cluster labels in main vhh df
     
     #set index to sequence_id so that it's easy to assign new labels
     vhh = vhh.set_index('sequence_id')
@@ -149,6 +154,9 @@ if __name__ == '__main__':
         
         #find idxs that have already been taken care of
         old_idx = vhh[[f'group{ii}' for ii in range(i)]].any(axis=1)
+        
+        missing = (old_idx&(vhh['sequential_clone_id'].isna())).sum()
+        print(f'Pre i = {i}: {missing} seqeunces are missing labels out of {old_idx.sum()} that should be.',flush=True)
         
         #find idxs in this group but not any previous groups
         new_idx = vhh[f'group{i}'] & ~old_idx
@@ -173,12 +181,17 @@ if __name__ == '__main__':
         unmatched = vhh[new_idx].drop(good_matches['query'],axis=0)
         print(f'{len(unmatched)} sequences need to be clustered at step {i}.',flush=True)
         unmatched,_,meta_id_cols = meta_ANARCI_clustering_alt(args,unmatched,out_dir,out_fname,pool,ncpus)
-        #note that index of unmatched gets reset in the clustering process
-        
+        unmatched = unmatched[keep_cols+meta_id_cols] #remove unnecessary columns
+        unmatched = unmatched.rename(columns={f'meta_clone_id_{args.meta_method[0]}_{args.meta_min_id[0]}':'sequential_clone_id'}) #rename meta id col
+        unmatched = unmatched.set_index('sequence_id') #set index back to sequence_id to match vhh dataframe
+
         #apply cluster labels to newly clustered sequences
         min_clust = vhh['sequential_clone_id'].max() + 1
-        vhh.loc[unmatched['sequence_id'],'sequential_clone_id'] = unmatched[meta_id_cols[0]].to_numpy() + min_clust
+        unmatched['sequential_clone_id'] += min_clust
+        not_unmatched = vhh.drop(unmatched.index,axis=0)
+        vhh = pd.concat([unmatched,not_unmatched],axis=0)
     
+    print(f'Post: {(vhh["sequential_clone_id"].isna()).sum()} seqeunces are missing labels out of {len(vhh)} that should be.',flush=True)
     print(f'{len(vhh["sequential_clone_id"].unique())} families found after linking.',flush=True)
     
     #merge results back onto data

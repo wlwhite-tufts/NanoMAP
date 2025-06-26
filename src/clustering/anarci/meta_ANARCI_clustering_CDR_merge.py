@@ -14,6 +14,8 @@ from scipy.cluster.hierarchy import linkage, fcluster
 
 sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
+sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/clustering/')
+from meta_ANARCI_clustering_alt import collect_seqs, annotate_and_filter_seqs
 
 #get user inputs
 parser = argparse.ArgumentParser(prog='Cluster Based on ANARCI alignment',
@@ -45,93 +47,23 @@ parser.add_argument('--CDR3_weight_N',type=int,default=1,help='Number of values 
 parser.add_argument('--max_len_diff',type=int,nargs=2,default=[3,3], help='Inclusive bounds for the range of values of maximum allowed difference in CDR length.')
 parser.add_argument('--max_len_diff_N',type=int,default=1,help='Number of values to test between the max_len_diff bounds.')
 
-parser.add_argument('--len_diff_penalty',type=float,nargs=2,default=[0.01,0.05], help='Inclusive bounds for the range of values of the distance penalty for CDR length differences.')
-parser.add_argument('--len_diff_penalty_N',type=int,default=3,help='Number of values to test between the len_diff_penalty bounds.')
-
 parser.add_argument('--linkage',type=str,default=['single','average','complete'],nargs='+',help='The linkage methods to try in weighted hierarchical clustering step (can be single, complete, or average).')
 
 parser.add_argument('--weighted_min_id',type=float,nargs=2,default=[0.3,0.7],help='Inclusinve bounds for the range of distance cutoff values to use in the weighted hierarchical clustering step.')
 parser.add_argument('--weighted_min_id_N',type=int,default=3,help='Number of values to test between the weighted_min_id bounds.')
 
+parser.add_argument('--final_merge_method',type=str,default=['complete'],nargs='+',help='The linkage method(s) to use in the final CDR-based merge.')
+
+parser.add_argument('--final_min_id',type=float,nargs=2,default=[0.75,0.95],help='Inclusinve bounds for the range of distance cutoff values to use in the final merge step.')
+parser.add_argument('--final_min_id_N',type=int,default=3,help='Number of values to test between the final_min_id bounds.')
+
 parser.add_argument('--score_fraction',type=float,default=0.5,help='Keep the top score_fraction of individual clusterings. Only these clusterings are used in metaclustering.')
-parser.add_argument('--dist_cutoff',type=float,default=0.4,help='CDR3 distance cutoff to use for determining if a pair of sequences within a cluster matches closely enough when scoring.')
+parser.add_argument('--score_top_N',type=int,default=100,help='When calculating inter-family distances, calcualte weighted distances to the top score_top_N MMseqs hits.')
 
 parser.add_argument('--meta_min_id',type=float,default=[0.35],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')
 parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
 
-def collect_seqs(files):
-        
-    print('Reading the following files:')
-    print('\n'.join([f.split('/')[-1] for f in files]))
-    data = pd.concat([pd.read_csv(tsv,sep='\t') for tsv in tqdm(files)],axis=0)
-    #drop less useful info
-    data = data[["sequence", "locus", "junction", "junction_aa", "v_call", "d_call", "j_call", "duplicate_count"]]
-    
-    print(f'{len(data)} rows in global set after loading tsvs.', flush=True)
-    return data
-
-def annotate_and_filter_seqs(args,data,pool,agg_funcs):
-    
-    #aggregate based on sequence
-    data = data.groupby(by='sequence',sort=False).aggregate(func=agg_funcs)
-    data.reset_index(inplace=True,drop=True) #not sure why, but need drop=True here to avoid error, despite not needing this in other cases
-    print(f'{len(data)} unique DNA sequences.', flush=True)
-    
-    #get translations based on scanning for start and end sequences
-    seq_info = pd.DataFrame(pool.starmap(translate_VHH_end_scan,
-                                         [(seq, args.start_seq, args.end_seq, args.max_start_scan, args.max_end_scan) for seq in data['sequence']],
-                                         chunksize=5000),
-                            columns=['sequence','VHH','start_match','start_i','start_f','end_match','end_i'])
-    data = data.merge(seq_info,on='sequence',how='outer')
-    print(f'{len(data)} unique DNA sequences after merging translation info.', flush=True)
-    
-    #get filtering statistics
-    has_stop = data['VHH'].map(lambda x: '*' in x)
-    bad_start = data['start_match'] < args.min_start_match
-    bad_end = data['end_match'] < args.min_end_match
-    print(f'{np.sum(has_stop)} ({round(np.mean(has_stop)*100,2)}%) of sequences have an early stop.', flush=True)
-    print(f'{np.sum(bad_start)} ({round(np.mean(bad_start)*100,2)}%) of sequences have <{args.min_start_match} matches to the start sequence.',flush=True)
-    print(f'{np.sum(bad_end)} ({round(np.mean(bad_end)*100,2)}%) of sequences have <{args.min_start_match} matches to the end sequence.', flush=True)
-    
-    #filter out bad sequences
-    data = data.loc[(~has_stop)&(~bad_start)&(~bad_end),:]
-    print(f'{len(data)} unique DNA sequences after filtering out these errors.', flush=True)
-    
-    #get duplicate count of the AA seq encoded by the DNA sequence
-    vhh_agg_funcs = {'VHH':lambda x: x.iloc[0], 'duplicate_count':np.sum}
-    vhh_agg = data[['VHH','duplicate_count']].groupby('VHH').aggregate(func=vhh_agg_funcs)
-    vhh_agg.reset_index(inplace=True,drop=True) #not sure why, but need drop=True here to avoid error, despite not needing this in other cases
-    print(f'{len(vhh_agg)} unique VHHs.', flush=True)
-    vhh_agg = vhh_agg.rename({'duplicate_count':'VHH_duplicate_count'},axis=1)
-    
-    #merge vhh duplicate counts onto main df
-    data = data.merge(vhh_agg,on='VHH',how='outer')
-    print(f'{len(data)} rows after merging with AA-level data.', flush=True)
-    
-    #drop sequences who's translations are observed only once across the whole dataset
-    data = data.loc[data['VHH_duplicate_count']>1,:]
-    print(f'{len(data)} unique DNA sequnces, encoding {len(data["VHH"].unique())} unique VHHs after dropping singleton AA sequences.', flush=True)
-    data.index = range(len(data)) #reset index
-    
-    #make sequence_id column
-    data['sequence_id'] = data.index.map(lambda i: 'GS-'+str(i))
-    
-    #drop duplicate full-length amino acid seqs (no need to track counts b/c we already did this)
-    data = data.sort_values(by='duplicate_count',ascending=False) #put in order of highest counts
-    vhh = data.drop_duplicates('VHH',keep='first') #keep most abundant
-    print(f'{len(vhh)} unique VHHs.', flush=True)
-    
-    #get ANARCI annotations
-    print(f'Getting ANARCI parses.', flush=True)
-    anarci_info = pd.DataFrame(pool.map(get_anarci_alignment, vhh['VHH'],chunksize=1000),
-                              columns=['VHH','anarci_parse','CDR1','CDR2','CDR3','ANARCI_success'])
-    
-    vhh = vhh.merge(anarci_info[['VHH','anarci_parse', 'CDR1','CDR2','CDR3','ANARCI_success']],on='VHH',how='outer')
-    print(f'{len(vhh)} rows after merging with ANARCI data.', flush=True)
-    
-    return data,vhh
-
-def meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus):
+def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     #############
     ## get parameter combos
     #############
@@ -140,14 +72,17 @@ def meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus):
     recursive_min_id_vals = list(recursive_min_id_vals)
     
     cdr3_dist_combos = itertools.product(np.linspace(*args.CDR3_weight,args.CDR3_weight_N),
-                                         np.linspace(*args.max_len_diff,args.max_len_diff_N),
-                                         np.linspace(*args.len_diff_penalty,args.len_diff_penalty_N))
+                                         np.linspace(*args.max_len_diff,args.max_len_diff_N))
     cdr3_dist_combos = list(cdr3_dist_combos)
                                          
     weighted_clustering_combos = itertools.product(args.linkage,
                                                    np.linspace(*args.weighted_min_id,args.weighted_min_id_N))
     weighted_clustering_combos = list(weighted_clustering_combos)
     
+    final_merge_combos = itertools.product(args.final_merge_method,
+                                           np.linspace(*args.final_min_id,args.final_min_id_N))
+    final_merge_combos = list(final_merge_combos)
+
     #############
     ## group sequences based on V and J identity
     #############
@@ -209,12 +144,7 @@ def meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus):
                         #get dist matrix
                         CDR_list_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in mmseqs_group.iterrows()]
                         
-                        dists = np.array(pool.starmap(ANARCI_dist_with_penalty_row,((CDR_list1,
-                                                                                    CDR_list_list,
-                                                                                    [1,1,dist_params[0]],
-                                                                                    [dist_params[1]]*3,
-                                                                                    dist_params[2]) for CDR_list1 in CDR_list_list),
-                                                      chunksize=10))
+                        dists = np.array(pool.starmap(ANARCI_dist_row,((CDR_list1,CDR_list_list,[1,1,dist_params[0]],[dist_params[1]]*3) for CDR_list1 in CDR_list_list)))
                         #try all clustering param combos
                         for clust_idx,clust_params in enumerate(weighted_clustering_combos):
                             clusterer = AgglomerativeClustering(metric='precomputed',
@@ -237,35 +167,67 @@ def meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus):
             #delete mmseqs_id column so it can be re-used in the next mmseqs recursive split
             del scoper_group['mmseqs_id']
                 
-    print(f'Finished individual clusterings.', flush=True)
+    print(f'Finished primary individual clusterings, starting merges.', flush=True)
     
     #defragment by copying df
     vhh = vhh.copy()
     vhh.to_csv(f'{tmp_dir}/intermediate.csv')
-          
+    
+    #############
+    ## merge very similar clusters (using CDR distance)
+    #############
+    
+    id_cols = [col for col in vhh.columns if 'clone_id' in col]
+    
+    #for each of the above clusterings ... try all requested merging values
+    for col in tqdm(id_cols):
+    
+        #get group representatives (most abundant member of each group)
+        rep_seqs = vhh.sort_values(by='VHH_duplicate_count',ascending=False)[[col,'CDR1','CDR2','CDR3']].groupby(col).first().reset_index()
+
+        #calculate pairwise distances between group reps
+        CDR_list_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in rep_seqs.iterrows()]
+        dists = np.array(pool.starmap(ANARCI_dist_row,((CDR_list1,CDR_list_list,[1,1,np.mean(args.CDR3_weight)],[np.mean(args.max_len_diff)]*3) for CDR_list1 in CDR_list_list)))
+        
+        #try each requested merge min_id and method
+        for merge_idx,(merge_method, merge_min_id) in enumerate(final_merge_combos):
+            
+            #get labels
+            clusterer = AgglomerativeClustering(metric='precomputed',
+                                                linkage=merge_method,
+                                                distance_threshold=1-merge_min_id,
+                                                n_clusters=None)
+            rep_seqs.loc[:,f'{col}_{merge_idx}'] = clusterer.fit_predict(dists)
+        
+        #merge on final cluster info
+        vhh = vhh.merge(rep_seqs[[col]+[f'{col}_{merge_idx}' for merge_idx in range(len(final_merge_combos))]],on=col,how='left')
+        
+        #delete original column since it is no longer needed
+        del vhh[col]
+        
+        #defragment by copying df (and reset index)
+        vhh = vhh.copy()
+    
+    #save checkpoint
+    vhh.to_csv(f'{tmp_dir}/intermediate.csv')
+    
+    print(f'Finished merges, starting quality filtering.', flush=True)
+        
     #############
     ## filter individual clusterings
     #############
     
     id_cols = [col for col in vhh.columns if 'clone_id' in col]
-    #skip filtering if filter is set to 0
+    #skip filtering if all columns will be kept
     if args.score_fraction < 1:
         
-        scores_df = []
-        for col in tqdm(id_cols):
-            col_scores = []
-            for g,group in vhh.groupby(col):
-                col_scores.append(cluster_ratio_score(group['CDR3'].unique(),args.dist_cutoff,pool))
-            s = np.mean(col_scores)
-            scores_df.append([col,s])
-            print(f'Score: {col}, {s}',flush=True)
-            
-        scores_df = pd.DataFrame(scores_df,columns=['column','score'])
-        scores_df = scores_df.sort_values(by='score',ascending=False)
-        N_keep = int(len(scores_df)*args.score_fraction)
-        scores_df = scores_df.head(N_keep)
-        keep_cols = scores_df['column'].tolist()
-        print(f'{len(keep_cols)} of {len(id_cols)} clusterings pass the score cutoff ({scores_df["score"].values[-1]}).',flush=True)
+        score_df = weighted_ANARCI_silhouette(vhh, id_cols, args.score_top_N, [1,1,np.mean(args.CDR3_weight)], [np.mean(args.max_len_diff)]*3, pool, tmp_dir+'_mmseqs')
+        
+        score_df = score_df.sort_values(by='score',ascending=False)
+        score_df = score_df.head(int(len(score_df)*args.score_fraction))
+        keep_cols = score_df['name'].tolist()
+                
+        print(f'{len(keep_cols)} of {len(id_cols)} clusterings pass the score cutoff ({score_df["score"].min()}).',flush=True)
     else:
         keep_cols = id_cols
         print(f'All clusterings pass the score cutoff.',flush=True)
@@ -299,6 +261,8 @@ def meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus):
     print(f'{len(vhh)} VHHs before merge.',flush=True)
     vhh = vhh.merge(group_reps[['fine_clone_id']+meta_id_cols],on='fine_clone_id',how='outer')
     print(f'{len(vhh)} VHHs after merge.',flush=True)
+    
+    vhh = vhh.astype(dtype={col:int for col in id_cols+meta_id_cols})
     
     #clean up
     subprocess.run(['rm', '-r', tmp_dir])
@@ -337,7 +301,7 @@ if __name__ == '__main__':
             agg_funcs[c] = np.sum
     
     data,vhh = annotate_and_filter_seqs(args,data,pool,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
-    vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
+    vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
     
     #add clustering results to main dataframe
     print(f'{len(data)} sequences before merge.',flush=True)

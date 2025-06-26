@@ -401,7 +401,7 @@ def run_preseq_assembly(data,sample_df,pair_df,out_dir,kind,pool,
                     f.write(f'>{row["sequence_id"]}\n{row[seq_col]}\n')
                     
             #run mmseqs to find closest family
-            result = subprocess.run(['/cluster/tufts/biocontainers/tools/mmseqs2/17.b804f/bin/mmseqs',
+            result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
                                      'easy-search', f'{tmp_dir}/tmp_mmseqs_query.fasta', mmseqs_db, f'{tmp_dir}/mmseqs_results', tmp_dir,
                                      '-s', '6', #sensitivity
                                      '--local-tmp', tmp_dir,
@@ -605,8 +605,98 @@ def weighted_anarci_dist_index(idx1,idx2,df,weight_scheme,max_len_diffs):
     cdr_list1 = df.loc[idx1[0],['CDR1','CDR2','CDR3']].tolist()
     cdr_list2 = df.loc[idx2[0],['CDR1','CDR2','CDR3']].tolist()
     return weighted_anarci_dist(cdr_list1,cdr_list2,weight_scheme,max_len_diffs)
+    
+def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, weight_scheme, max_len_diffs, pool, tmp_dir):
+    
+    os.mkdir(tmp_dir)
+    
+    full_df = full_df.copy()
+    full_df = full_df.sort_values(by='VHH_duplicate_count',ascending=False)
+    
+    #collect set of all possible family representatives
+    all_reps = []
+    for id_col in id_cols:
+        all_reps.append(full_df.drop_duplicates(id_col,keep='first').copy())
+    all_reps = pd.concat(all_reps,axis=0).drop_duplicates('VHH').set_index('sequence_id')
+    print(f'Collected representatives from all clusterings. Total rows: {len(all_reps)}')
+    
+    #run MMseqs to find close matches across family representaives
+    with open(f'{tmp_dir}/tmp_silhouette_mmseqs.fasta','w') as f:
+        for i,row in all_reps.iterrows():
+            f.write(f'>{row.name}\n{row["VHH"]}\n')
+            
+    result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
+                             'easy-search', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/mmseqs_results', tmp_dir,
+                             '-s', '7.5', #sensitivity
+                             '-c', '0', #don't filter on coverage
+                             '--min-seq-id', '0', #don't filter here because we want to have full distribution info
+                             '--local-tmp', tmp_dir,
+                             '--format-output', 'query,target,pident',
+                             '--max-seq-id','1.0', #do not do any redundancy filtering
+                             '--max-seqs', str(mmseqs_n+1), #look at best seq for each query (add one to account for finding the sequence itself)
+                             '-v', '0'])
+    assert result.returncode == 0
+                    
+    mmseqs_df = pd.read_csv(f'{tmp_dir}/mmseqs_results',names=['query','target','pident'],sep='\t')
+    
+    #remove tmp files
+    subprocess.run(['rm', '-r', tmp_dir])
+    
+    #remove matches to self
+    mmseqs_df = mmseqs_df[mmseqs_df['query']!=mmseqs_df['target']]
+    
+    #get weighted CDR3 distances for each pair in the MMseqs results
+    mmseqs_df['dist'] = pool.starmap(weighted_anarci_dist,((all_reps.loc[row['query'],['CDR1','CDR2','CDR3']].tolist(),
+                                                            all_reps.loc[row['target'],['CDR1','CDR2','CDR3']].tolist(),
+                                                            weight_scheme,
+                                                            max_len_diffs) for i,row in mmseqs_df.iterrows()))
+                                                            
+    #calculate silhouette score for each clustering
+    score_df = []
+    for id_col in tqdm(id_cols):
+        
+        #get the mmseqs results that are actually relevant to this clustering
+        fam_reps = set(full_df.drop_duplicates(id_col,keep='first')['sequence_id'])
+        mmseqs_subset = mmseqs_df[mmseqs_df['query'].map(lambda x: x in fam_reps)&mmseqs_df['target'].map(lambda x: x in fam_reps)]
+        
+        #calculate closest neighbor to each family
+        external_dists = mmseqs_subset.groupby('query')['dist'].min()
 
-def recursive_mmseqs_split(group, max_group_size, min_id, id_step, tmp_dir, ncpus):
+        tot_score = 0
+        #for each family, calculate the silhouette
+        for g,group in full_df.groupby(id_col):
+            CDR_list_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in group.iterrows()]
+            
+            #get within-family distances
+            if len(group) > 1:
+                internal_dists = pool.starmap(weighted_anarci_dist,((CDR_list1,CDR_list2,weight_scheme,max_len_diffs) for i,CDR_list1 in enumerate(CDR_list_list[:-1]) for CDR_list2 in CDR_list_list[i+1:]))
+                internal_dists = squareform(internal_dists)
+                internal_score = np.mean(np.max(internal_dists,axis=0)) #this represents the average distance of each sequence to it's furthest family member
+            else:
+                internal_score = 0
+            
+            #add score to total (weighting for size of the family)
+            rep_seq_id = group['sequence_id'].values[0]
+            try: #try getting actual distance
+                tot_score += (external_dists.loc[rep_seq_id] - internal_score)*len(group)
+            except KeyError: #if can't find actual distance, look in broader df
+                print(f"WARNING: can't find representative for family {rep_seq_id} in {id_col} representatives. Using broader set.",flush=True)
+                ext_dist = mmseqs_df.loc[mmseqs_df['query']==rep_seq_id,'dist'].min()
+                
+        
+        score_df.append([id_col,tot_score/len(full_df)]) #normalize score to total number of sequences
+        print(f'Score: {id_col}, {tot_score/len(full_df)}',flush=True)
+    
+    return pd.DataFrame(data=score_df,columns=['name','score'])
+
+def recursive_mmseqs_split(group, max_group_size, min_id, id_step, method, tmp_dir, ncpus):
+    
+    if method == 'setcover':
+        method_index = '0'
+    elif method == 'conncomp':
+        method_index = '1'
+    else:
+        raise ValueError('Invalid recursive splitting method.')
     
     group_index = group.index.copy()
     
@@ -623,7 +713,7 @@ def recursive_mmseqs_split(group, max_group_size, min_id, id_step, tmp_dir, ncpu
                 f.write(f">{row['sequence_id']}\n{row['VHH']}\n") #Index here is the intermediate_id
                 
         #run mmseqs clustering
-        result = subprocess.run(['/cluster/tufts/biocontainers/tools/mmseqs2/17.b804f/bin/mmseqs', 'easy-cluster',
+        result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs', 'easy-cluster',
                                 f'{tmp_dir}/mmseqs_in.fasta', f'{tmp_dir}/mmseqs_out', f'{tmp_dir}/tmp',
                                  '-s', '7.5', #sensitivity set to max
                                  '-c', str(max(0,(min_id - 0.2))), #set this lower than seq-id cutoff so it doesn't have an impact
@@ -632,7 +722,7 @@ def recursive_mmseqs_split(group, max_group_size, min_id, id_step, tmp_dir, ncpu
                                  '-v', '1', #verbosity
                                  '--cluster-steps', '3', #use faster cascaded clustering method
                                  '--seq-id-mode', '0', #use alignment length to normalize
-                                 '--cluster-mode', '0', #use greedy setcover algorithm
+                                 '--cluster-mode', method_index, #use user-specified method
                                  '--alignment-mode', '3', #get percent identity, rather than alignment score
                                  '--max-seqs', '1000', #get top 1000 matches to each query
                                  '--gap-open', '20', #set high gap-opening penalty to prevent excessive gaps
@@ -656,7 +746,7 @@ def recursive_mmseqs_split(group, max_group_size, min_id, id_step, tmp_dir, ncpu
         subgroups = []
         max_min_id = 0
         for _,subgroup in group.groupby('mmseqs_id'):
-            split, sg_min_id = recursive_mmseqs_split(subgroup, max_group_size, min_id+id_step, id_step, tmp_dir, ncpus)
+            split, sg_min_id = recursive_mmseqs_split(subgroup, max_group_size, min_id+id_step, id_step, method, tmp_dir, ncpus)
             subgroups.append(split)
             max_min_id = max(max_min_id,sg_min_id)
             
@@ -740,7 +830,7 @@ def cluster_ratio_score(seqs,max_diff,pool):
     if len(seqs) == 1:
         return 0
     
-    dists = np.array(pool.starmap(norm_dist,((s1,s2) for i,s1 in enumerate(seqs[:-1]) for s2 in seqs[i+1:]),chunksize=1000))
+    dists = np.array(pool.starmap(norm_dist,((s1,s2) for i,s1 in enumerate(seqs[:-1]) for s2 in seqs[i+1:])))
     tot_good = np.sum(dists<=max_diff)
     tot_bad = np.sum(dists>max_diff)
         

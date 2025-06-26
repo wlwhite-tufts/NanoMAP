@@ -67,7 +67,7 @@ parser.add_argument('--figure_file',type=str,default='',help='File name prefix f
 
 def find_closest_match(query_df,target_df,tmp_dir,figure_fname):
     os.mkdir(tmp_dir)
-    
+
     #write temp fasta files
     with open(f'{tmp_dir}tmp_mmseqs_query.fasta','w') as f:
         for i,row in query_df.iterrows():
@@ -167,7 +167,7 @@ if __name__ == '__main__':
             fig_file = f'{args.figure_file}_{i+1}.png'
         else:
             fig_file = ''
-        
+
         #find matches for new sequences
         matches = find_closest_match(vhh[new_idx].copy(),vhh[old_idx].copy(),tmp_dir,f'{args.figure_file}_{i}.png')
         
@@ -201,4 +201,5 @@ if __name__ == '__main__':
         
     #save results
     data.to_csv(args.out_file)
+
         

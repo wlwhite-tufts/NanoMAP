@@ -70,9 +70,8 @@ def collect_seqs(files):
     print(f'{len(data)} rows in global set after loading tsvs.', flush=True)
     return data
 
-def annotate_and_filter_seqs(args, data, pool):
+def annotate_and_filter_seqs(args, data, pool, ncpus, agg_funcs):
     # Aggregate duplicate DNA sequences
-    agg_funcs = {col: (lambda x: x.iloc[0]) if col != 'duplicate_count' else np.sum for col in data.columns}
     data = data.groupby('sequence', sort=False).aggregate(func=agg_funcs).reset_index(drop=True)
     print(f'{len(data)} unique DNA sequences.', flush=True)
 
@@ -334,7 +333,8 @@ if __name__ == '__main__':
         files = glob(f'{args.in_dir}*/*db-pass.tsv')
     
     data = collect_seqs(files) #get sequence info from user-specificed folder
-    data,vhh = annotate_and_filter_seqs(args,data,pool) #get translations, CDR anotations, and filter out bad/singleton sequences
+    agg_funcs = {col: (lambda x: x.iloc[0]) if col != 'duplicate_count' else np.sum for col in data.columns}
+    data,vhh = annotate_and_filter_seqs(args,data,pool,ncpus,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
     vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_alt(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
     
     #add clustering results to main dataframe

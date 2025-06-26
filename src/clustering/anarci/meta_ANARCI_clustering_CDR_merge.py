@@ -309,7 +309,7 @@ if __name__ == '__main__':
         else:
             agg_funcs[c] = np.sum
     
-    data,vhh = annotate_and_filter_seqs(args,data,pool,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
+    data,vhh = annotate_and_filter_seqs(args,data,pool,ncpus,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
     vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
     
     #add clustering results to main dataframe

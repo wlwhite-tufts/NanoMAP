@@ -11,6 +11,8 @@ import argparse
 import itertools
 from collections import defaultdict
 from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import squareform
+from Levenshtein import distance
 
 sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
@@ -57,9 +59,15 @@ parser.add_argument('--final_merge_method',type=str,default=['complete'],nargs='
 parser.add_argument('--final_min_id',type=float,nargs=2,default=[0.75,0.95],help='Inclusinve bounds for the range of distance cutoff values to use in the final merge step.')
 parser.add_argument('--final_min_id_N',type=int,default=3,help='Number of values to test between the final_min_id bounds.')
 
+#scoring args
 parser.add_argument('--score_fraction',type=float,default=0.5,help='Keep the top score_fraction of individual clusterings. Only these clusterings are used in metaclustering.')
-parser.add_argument('--score_top_N',type=int,default=100,help='When calculating inter-family distances, calcualte weighted distances to the top score_top_N MMseqs hits.')
+parser.add_argument('--score_top_N',type=int,default=10,help='When calculating inter-family distances, calcualte weighted distances to the top score_top_N MMseqs hits for each family representative.')
+parser.add_argument('--min_clust_reps',type=int,default=10,help='When calculating inter-family distances, select at least the top min_clust_reps most abundant members to represent each family.')
+parser.add_argument('--max_extra_reps',type=int,default=150,help='When calculating inter-family distances, split clusterings into groups of no more than max_group_size members based on the overlap of their representatives.')
+parser.add_argument('--min_id_for_approx_dist',type=float,default=0.9,help='When updating intra-family distances during merge step, use this fraction identity cutoff in mmseqs clusteing to find cluster representatives.')
+parser.add_argument('--min_cluster_size_shortcut',type=int,default=300,help='When updating intra-family distances during merge step, shortcut the calculation for each merge where both clusters are larger than min_cluster_size_shortcut.')
 
+#metaclusterign args
 parser.add_argument('--meta_min_id',type=float,default=[0.35],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')
 parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
 
@@ -131,20 +139,40 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
                 
                 #try all CDR3 weight values
                 for cdr_idx,dist_params in enumerate(cdr3_dist_combos):
+                    
+                    # Map row positions for iloc
+                    row_pos = vhh.index.get_indexer(mmseqs_group.index)
                 
                     #skip this group if it has only one member
                     if len(mmseqs_group) == 1:
                         
                         #save ID number for all clustering param combos
                         for clust_idx,_ in enumerate(weighted_clustering_combos):
-                            vhh.loc[mmseqs_group.index,f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'] = min_id[(rec_idx,cdr_idx,clust_idx)] #use min_id as usual
+                            
+                            #save ID number for all clustering param combos
+                            clust_col = f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'
+                            dist_col = f'farthest_{rec_idx}_{cdr_idx}_{clust_idx}'
+                            
+                            # Initialize column if it doesn't exist
+                            if clust_col not in vhh.columns:
+                                vhh[clust_col] = np.nan
+                                vhh[dist_col] = np.nan
+                            
+                            #record cluster label and dist to furthest within cluster
+                            vhh.iloc[row_pos, vhh.columns.get_loc(clust_col)] = min_id[(rec_idx,cdr_idx,clust_idx)] #use min_id as usual
+                            vhh.iloc[row_pos, vhh.columns.get_loc(dist_col)] = 0
     
                     #actually do clustering for groups with >1 member
                     else:
                         #get dist matrix
-                        CDR_list_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in mmseqs_group.iterrows()]
+                        CDR_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in mmseqs_group.iterrows()]
                         
-                        dists = np.array(pool.starmap(ANARCI_dist_row,((CDR_list1,CDR_list_list,[1,1,dist_params[0]],[dist_params[1]]*3) for CDR_list1 in CDR_list_list)))
+                        dists = np.array(pool.starmap(weighted_anarci_dist,((cdr1,
+                                                                            cdr2,
+                                                                            [1,1,dist_params[0]],
+                                                                            [dist_params[1]]*3) for i,cdr1 in enumerate(CDR_list[:-1]) for cdr2 in CDR_list[i+1:]),chunksize=1000))
+                        dists = squareform(dists)
+
                         #try all clustering param combos
                         for clust_idx,clust_params in enumerate(weighted_clustering_combos):
                             clusterer = AgglomerativeClustering(metric='precomputed',
@@ -152,34 +180,38 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
                                                                 distance_threshold=1-clust_params[1],
                                                                 n_clusters=None)
                             labels = clusterer.fit_predict(dists) + min_id[(rec_idx,cdr_idx,clust_idx)]
-                            # print(f'SCOPer: {g}, ({rec_idx},{cdr_idx},{clust_idx}): {min_id[(rec_idx,cdr_idx,clust_idx)]}, NaNs: {np.mean(np.isnan(labels))}',flush=True)
-                            
+
                             #merge labels onto group info
-                            col_name = f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'
+                            clust_col = f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'
+                            dist_col = f'farthest_{rec_idx}_{cdr_idx}_{clust_idx}'
                             
                             # Initialize column if it doesn't exist
-                            if col_name not in vhh.columns:
-                                vhh[col_name] = np.nan
-                            
-                            # Map row and column positions for iloc
-                            row_pos = vhh.index.get_indexer(mmseqs_group.index)
-                            col_pos = vhh.columns.get_loc(col_name)
+                            if clust_col not in vhh.columns:
+                                vhh[clust_col] = np.nan
+                                vhh[dist_col] = np.nan
                             
                             # Assign using iloc for speed
-                            vhh.iloc[row_pos, col_pos] = labels
-                            # print(f'Test: {(vhh.loc[mmseqs_group.index,"sequence_id"]==mmseqs_group["sequence_id"]).sum()}, {len(mmseqs_group)}, {len(vhh.loc[mmseqs_group.index,:])}',flush=True)
-                
+                            vhh.iloc[row_pos, vhh.columns.get_loc(clust_col)] = labels
+                            
+                            #get dist to furthest within cluster for each cluster without expanding condensed distance matrix
+                            furthest_dists = np.zeros([len(labels)])*np.nan
+                            for l in np.unique(labels):
+                                idxs = labels==l
+                                furthest_dists[idxs] = np.max(dists[idxs,:][:,idxs],axis=0)
+                            vhh.iloc[row_pos, vhh.columns.get_loc(dist_col)] = furthest_dists
+                    
                     #update min_id for all clustering variations
                     for clust_idx,_ in enumerate(weighted_clustering_combos):
                         min_id[(rec_idx,cdr_idx,clust_idx)] = vhh[f'clone_id_{rec_idx}_{cdr_idx}_{clust_idx}'].max() + 1
                 
             #delete mmseqs_id column so it can be re-used in the next mmseqs recursive split
             del scoper_group['mmseqs_id']
+            
+            #defragment the dataframe
+            vhh = vhh.copy()
                 
     print(f'Finished primary individual clusterings, starting merges.', flush=True)
     
-    #defragment by copying df
-    vhh = vhh.copy()
     vhh.to_csv(f'{tmp_dir}/intermediate.csv')
     
     #############
@@ -189,14 +221,20 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     id_cols = [col for col in vhh.columns if 'clone_id' in col]
     
     #for each of the above clusterings ... try all requested merging values
-    for col in tqdm(id_cols):
-    
+    for id_col in tqdm(id_cols):
+        
+        dist_col = id_col.replace('clone_id','farthest')
+        
         #get group representatives (most abundant member of each group)
-        rep_seqs = vhh.sort_values(by='VHH_duplicate_count',ascending=False)[[col,'CDR1','CDR2','CDR3']].groupby(col).first().reset_index()
+        rep_seqs = vhh.sort_values(by='VHH_duplicate_count',ascending=False)[[id_col,'CDR1','CDR2','CDR3']].groupby(id_col).first().reset_index()
 
         #calculate pairwise distances between group reps
-        CDR_list_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in rep_seqs.iterrows()]
-        dists = np.array(pool.starmap(ANARCI_dist_row,((CDR_list1,CDR_list_list,[1,1,np.mean(args.CDR3_weight)],[np.mean(args.max_len_diff)]*3) for CDR_list1 in CDR_list_list)))
+        CDR_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in rep_seqs.iterrows()]
+        dists = pool.starmap(weighted_anarci_dist,((cdr1,
+                                                    cdr2,
+                                                    [1,1,np.mean(args.CDR3_weight)],
+                                                    [np.mean(args.max_len_diff)]*3) for i,cdr1 in enumerate(CDR_list[:-1]) for cdr2 in CDR_list[i+1:]),chunksize=1000)
+        dists = squareform(dists)
         
         #try each requested merge min_id and method
         for merge_idx,(merge_method, merge_min_id) in enumerate(final_merge_combos):
@@ -206,16 +244,124 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
                                                 linkage=merge_method,
                                                 distance_threshold=1-merge_min_id,
                                                 n_clusters=None)
-            rep_seqs.loc[:,f'{col}_{merge_idx}'] = clusterer.fit_predict(dists)
+            rep_seqs.loc[:,f'{id_col}_{merge_idx}'] = clusterer.fit_predict(dists)
         
         #merge on final cluster info
-        vhh = vhh.merge(rep_seqs[[col]+[f'{col}_{merge_idx}' for merge_idx in range(len(final_merge_combos))]],on=col,how='left')
-        
-        #delete original column since it is no longer needed
-        del vhh[col]
+        vhh = vhh.merge(rep_seqs[[id_col]+[f'{id_col}_{merge_idx}' for merge_idx in range(len(final_merge_combos))]],on=id_col,how='left')
+
+        #update within-cluster distances if needed for scoring
+        if args.score_fraction < 1:
+
+            #get distance function params used in the clusterings that were merged
+            dist_param_idx = int(id_col.split('_')[3])
+            dist_params = cdr3_dist_combos[dist_param_idx]
+            
+            representatives = {} #use this to store representatives for large clusters
+            saved_merge_dists = {} #use this to hold onto farthest within-cluster distance data from merges to re-use as needed
+            for merge_idx,(merge_method, merge_min_id) in enumerate(final_merge_combos):
+                
+                #get all families that were merged
+                merges = [group[id_col].tolist() for g,group in rep_seqs[[id_col,f'{id_col}_{merge_idx}']].groupby(f'{id_col}_{merge_idx}') if len(group)>1]
+                
+                #for each merge, calculate cross-family distances for merged families
+                vhh[f'{dist_col}_{merge_idx}'] = np.nan
+                for merge in merges:
+                    #iterate over all pairs of families
+                    for f1,fam1 in enumerate(merge[:-1]):
+                        fam1_idx = vhh[id_col] == fam1
+                        fam1_size = fam1_idx.sum()
+                        fam1_cdr_list = [row[['CDR1','CDR2','CDR3']].tolist() for i,row in vhh[fam1_idx].iterrows()]
+                        
+                        for fam2 in merge[f1+1:]:
+                            fam2_idx = vhh[id_col] == fam2
+                            fam2_size = fam2_idx.sum()
+                            
+                            #calculate dists if not already calculated
+                            if (fam1,fam2) not in saved_merge_dists:
+                                
+                                #if number of calculations is small, do them all
+                                if (fam1_size<=args.min_cluster_size_shortcut) and (fam2_size<=args.min_cluster_size_shortcut):
+                                    fam2_cdr_list = [row[['CDR1','CDR2','CDR3']].tolist() for i,row in vhh[fam2_idx].iterrows()]
+                                    
+                                    dists = np.array(pool.starmap(ANARCI_dist_row,((cdr,fam1_cdr_list,[1,1,dist_params[0]],[dist_params[1]]*3) for cdr in fam2_cdr_list),chunksize=10))
+                                    
+                                    fam1_max = np.max(dists,axis=0)
+                                    fam2_max = np.max(dists,axis=1)
+                                #otherwise, take a shortcut
+                                else:
+                                    #if fam1 is too big, get representatives
+                                    if fam1_size > args.min_cluster_size_shortcut:
+                                        #recycle cluster1 reps if already calculated
+                                        if fam1 in representatives:
+                                            reps1 = representatives[fam1]
+                                        else:
+                                            reps1 = get_mmseqs_reps(vhh.loc[fam1_idx,:],args.min_id_for_approx_dist,ncpus,tmp_dir)
+                                            representatives[fam1] = reps1
+                                    #otherwise make each sequence its own rep
+                                    else:
+                                        reps1 = pd.concat([vhh.loc[fam1_idx,'sequence_id']]*2,axis=1)
+                                        reps1.columns = ['sequnce_id','mmseqs_id']
+                                        
+                                    #if fam2 is too big, get representatives
+                                    if fam2_size > args.min_cluster_size_shortcut:
+                                        if fam2 in representatives:
+                                            reps2 = representatives[fam2]
+                                        else:
+                                            reps2 = get_mmseqs_reps(vhh.loc[fam2_idx,:],args.min_id_for_approx_dist,ncpus,tmp_dir)
+                                            representatives[fam2] = reps2
+                                    #otherwise make each sequence its own rep
+                                    else:
+                                        reps2 = pd.concat([vhh.loc[fam2_idx,'sequence_id']]*2,axis=1)
+                                        reps2.columns = ['sequnce_id','mmseqs_id']
+                                    
+                                    #get list of all representatives
+                                    reps1_names = reps1['mmseqs_id'].unique()
+                                    reps2_names = reps2['mmseqs_id'].unique()
+                                    
+                                    #get CDR info from reps
+                                    vhh = vhh.set_index('sequence_id')
+                                    fam1_rep_cdrs = [row[['CDR1','CDR2','CDR3']].tolist() for i,row in vhh.loc[reps1_names,:].iterrows()]
+                                    fam2_rep_cdrs = [row[['CDR1','CDR2','CDR3']].tolist() for i,row in vhh.loc[reps2_names,:].iterrows()]
+                                    vhh = vhh.reset_index(drop=False)
+                                    
+                                    #calculate dists to fam1 reps
+                                    dists = np.array(pool.starmap(ANARCI_dist_row,((cdr,fam2_rep_cdrs,[1,1,dist_params[0]],[dist_params[1]]*3) for cdr in fam1_rep_cdrs),chunksize=10))
+                                    fam1_max = np.max(dists,axis=1)
+                                    #assign dists to each member of the cluster they came from
+                                    fam1_max = pd.DataFrame({'mmseqs_id':reps1_names,'dist':fam1_max})
+                                    fam1_max = reps1.merge(fam1_max,on='mmseqs_id',how='left')['dist'].values
+
+                                    #calculate dists to fam2 reps
+                                    dists = np.array(pool.starmap(ANARCI_dist_row,((cdr,fam1_rep_cdrs,[1,1,dist_params[0]],[dist_params[1]]*3) for cdr in fam2_rep_cdrs),chunksize=10))
+                                    fam2_max = np.max(dists,axis=1)
+                                    #assign dists to each member of the cluster they came from
+                                    fam2_max = pd.DataFrame({'mmseqs_id':reps2_names,'dist':fam2_max})
+                                    fam2_max = reps2.merge(fam2_max,on='mmseqs_id',how='left')['dist'].values
+
+                                #save farthest dists
+                                saved_merge_dists[(fam1,fam2)] = fam1_max
+                                saved_merge_dists[(fam2,fam1)] = fam2_max
+                            #otherwise use saved dists
+                            else:
+                                fam1_max = saved_merge_dists[(fam1,fam2)]
+                                fam2_max = saved_merge_dists[(fam2,fam1)]
+                            
+                            #find new farthest for each of the sequences in the merged families
+                            vhh.loc[fam1_idx,f'{dist_col}_{merge_idx}'] = np.fmax(vhh.loc[fam1_idx,f'{dist_col}_{merge_idx}'],fam1_max)
+                            vhh.loc[fam2_idx,f'{dist_col}_{merge_idx}'] = np.fmax(vhh.loc[fam2_idx,f'{dist_col}_{merge_idx}'],fam2_max)
+                            
+                # compare new farthest distances to old ones and fill in those that didn't need to be updated
+                vhh[f'{dist_col}_{merge_idx}'] = vhh[[dist_col,f'{dist_col}_{merge_idx}']].max(axis=1)
+                
+        #delete original column and related furthest distance column since it is no longer needed
+        del vhh[id_col]
+        del vhh[dist_col]
         
         #defragment by copying df (and reset index)
         vhh = vhh.copy()
+    
+    #reset index
+    vhh = vhh.reset_index(drop=False)
     
     #save checkpoint
     vhh.to_csv(f'{tmp_dir}/intermediate.csv')
@@ -230,9 +376,10 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     #skip filtering if all columns will be kept
     if args.score_fraction < 1:
         
-        score_df = weighted_ANARCI_silhouette(vhh, id_cols, args.score_top_N, [1,1,np.mean(args.CDR3_weight)], [np.mean(args.max_len_diff)]*3, pool, tmp_dir+'_mmseqs')
-        
-        score_df = score_df.sort_values(by='score',ascending=False)
+        score_df = weighted_ANARCI_silhouette_v3(vhh, id_cols, args.score_top_N, args.min_clust_reps, args.max_extra_reps,
+                                              cdr3_dist_combos, pool, tmp_dir+'_mmseqs')
+
+        score_df = pd.DataFrame(score_df,columns=['name','score']).sort_values(by='score',ascending=False)
         score_df = score_df.head(int(len(score_df)*args.score_fraction))
         keep_cols = score_df['name'].tolist()
                 
@@ -277,6 +424,72 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     subprocess.run(['rm', '-r', tmp_dir])
     
     return vhh,id_cols,meta_id_cols
+    
+def get_approx_furthest_dist(query_cdrs,target_df,top_N,weight_scheme,max_len_diffs):
+    
+    target_df = target_df.copy()
+    target_df['selected'] = False
+    
+    #collect candidate distant seqs
+    for cdr_idx in range(1,4):
+        #calculate single-CDR dist from query to each of the targets
+        cdrs = target_df[f'CDR{cdr_idx}'].unique().tolist()
+        cdr_dists = []
+        for cdr in cdrs:
+            dist = distance(query_cdrs[cdr_idx-1],cdr)/max(len(cdr),len(query_cdrs[cdr_idx-1]))
+            cdr_dists.append([cdr,dist])
+        cdr_dists = pd.DataFrame(cdr_dists,columns=['CDR','dist'])
+        
+        #get top_N most different cdrs
+        selected_cdrs = set(cdr_dists.sort_values(by='dist',ascending=False).head(top_N)['CDR'])
+        #add any target with matching CDR to the set to check further
+        target_df['selected'] = target_df['selected'] | target_df[f'CDR{cdr_idx}'].map(lambda x: x in selected_cdrs)
+    
+    #get selected sequences
+    reduction_factor = target_df['selected'].mean()
+    target_df = target_df[target_df['selected']]
+    
+    #calculate distances
+    max_dist = np.max([weighted_anarci_dist(query_cdrs,row[['CDR1','CDR2','CDR3']].tolist(),weight_scheme,max_len_diffs) for i,row in target_df.iterrows()])
+    
+    return max_dist,reduction_factor
+
+def get_mmseqs_reps(df,min_id,ncpus,tmp_dir):
+
+    #run mmseqs to get cluster representatives
+    os.mkdir(tmp_dir+'_mmseqs')
+    
+    with open(f'{tmp_dir}/mmseqs_in.fasta','w') as f:
+        for i,row in df.iterrows():
+            f.write(f">{row['sequence_id']}\n{''.join(row[['CDR1','CDR2','CDR3']])}\n") #Index here is the sequence_id
+            
+    #run mmseqs clustering
+    result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs', 'easy-cluster',
+                            f'{tmp_dir}/mmseqs_in.fasta', f'{tmp_dir}_mmseqs/mmseqs_out', f'{tmp_dir}_mmseqs/tmp',
+                             '-s', '7.5', #sensitivity set to max
+                             '-c', str(max(0,(min_id - 0.2))), #set this lower than seq-id cutoff so it doesn't have an impact
+                             '--min-seq-id', str(min_id), #only cluster seqs more similar than user input
+                             '-e', 'inf', #max e-value to be clustered (set to keep all)
+                             '-v', '1', #verbosity
+                             '--cluster-steps', '3', #use faster cascaded clustering method
+                             '--seq-id-mode', '0', #use alignment length to normalize
+                             '--cluster-mode', '0', #use greedy setcover
+                             '--alignment-mode', '3', #get percent identity, rather than alignment score
+                             '--max-seqs', '300', #get top 1000 matches to each query
+                             '--similarity-type', '2', #use sequence identity, not score
+                             '--threads', str(ncpus)]) #how many cpus to use
+    assert result.returncode == 0
+    
+    #read in clusters
+    mmseqs_clusters = pd.read_csv(f'{tmp_dir}_mmseqs/mmseqs_out_cluster.tsv',names=['mmseqs_id','sequence_id'],sep='\t')
+    
+    #clean up
+    subprocess.run(['rm','-r',tmp_dir+'_mmseqs'])
+    
+    #get reps
+    rep_list = mmseqs_clusters["mmseqs_id"].unique()
+    print(f'Reduced from {len(df)} sequences to {len(rep_list)} representatives.',flush=True)
+    return mmseqs_clusters
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -311,6 +524,9 @@ if __name__ == '__main__':
     
     data,vhh = annotate_and_filter_seqs(args,data,pool,ncpus,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
     vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
+    
+    #remove unnecessary column to save space
+    del vhh['anarci_parse']
     
     #add clustering results to main dataframe
     print(f'{len(data)} sequences before merge.',flush=True)

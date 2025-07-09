@@ -15,7 +15,8 @@ from anarci import anarci
 import subprocess
 from glob import glob
 from scipy.spatial.distance import cdist, pdist, squareform
-from sklearn.cluster import SpectralClustering
+from scipy.cluster.hierarchy import linkage
+from sklearn.cluster import SpectralClustering, AgglomerativeClustering
 
 # Snip bp from the end if it doesn't "fit"
 def translate_VHH(dna_data):
@@ -609,7 +610,7 @@ def weighted_anarci_dist_index(idx1,idx2,df,weight_scheme,max_len_diffs):
     cdr_list2 = df.loc[idx2[0],['CDR1','CDR2','CDR3']].tolist()
     return weighted_anarci_dist(cdr_list1,cdr_list2,weight_scheme,max_len_diffs)
     
-def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, weight_scheme, max_len_diffs, pool, tmp_dir):
+def weighted_ANARCI_silhouette_v1(full_df, id_cols, mmseqs_n, n_reps, dist_param_list, pool, tmp_dir):
     
     os.mkdir(tmp_dir)
     
@@ -617,11 +618,18 @@ def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, weight_scheme, max_le
     full_df = full_df.sort_values(by='VHH_duplicate_count',ascending=False)
     
     #collect set of all possible family representatives
-    all_reps = []
+    all_reps = pd.DataFrame()
     for id_col in id_cols:
-        all_reps.append(full_df.drop_duplicates(id_col,keep='first').copy())
-    all_reps = pd.concat(all_reps,axis=0).drop_duplicates('VHH').set_index('sequence_id')
-    print(f'Collected representatives from all clusterings. Total rows: {len(all_reps)}')
+        id_reps = full_df.groupby(id_col).head(n_reps)
+        all_reps = pd.concat([all_reps,id_reps],axis=0).drop_duplicates('VHH')
+    all_reps = all_reps.set_index('sequence_id')
+    print(f'Collected representatives from all clusterings. Total rows: {len(all_reps)}',flush=True)
+    
+    #figure out largest number of reps for a cluster in any clustering
+    max_reps = 0
+    for id_col in id_cols:
+        max_reps = max(max_reps,all_reps.groupby(id_col).size().max())
+    print(f'Across all clusterigns, the most represetned cluster has {max_reps} representatives (min value was set to {n_reps}).',flush=True)
     
     #run MMseqs to find close matches across family representaives
     with open(f'{tmp_dir}/tmp_silhouette_mmseqs.fasta','w') as f:
@@ -636,7 +644,7 @@ def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, weight_scheme, max_le
                              '--local-tmp', tmp_dir,
                              '--format-output', 'query,target,pident',
                              '--max-seq-id','1.0', #do not do any redundancy filtering
-                             '--max-seqs', str(mmseqs_n+1), #look at best seq for each query (add one to account for finding the sequence itself)
+                             '--max-seqs', str(mmseqs_n+max_reps), #look at best seq for each query (add n_reps to account for finding other sequences representing the same cluster)
                              '-v', '0'])
     assert result.returncode == 0
                     
@@ -648,49 +656,290 @@ def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, weight_scheme, max_le
     #remove matches to self
     mmseqs_df = mmseqs_df[mmseqs_df['query']!=mmseqs_df['target']]
     
-    #get weighted CDR3 distances for each pair in the MMseqs results
-    mmseqs_df['dist'] = pool.starmap(weighted_anarci_dist,((all_reps.loc[row['query'],['CDR1','CDR2','CDR3']].tolist(),
-                                                            all_reps.loc[row['target'],['CDR1','CDR2','CDR3']].tolist(),
-                                                            weight_scheme,
-                                                            max_len_diffs) for i,row in mmseqs_df.iterrows()))
+    #merge on clustering info about each query and target
+    mmseqs_df = mmseqs_df.merge(full_df[['sequence_id']+id_cols],left_on='query',right_on='sequence_id',how='left')
+    mmseqs_df = mmseqs_df.merge(full_df[['sequence_id']+id_cols],left_on='target',right_on='sequence_id',how='left',suffixes=('_query','_target'))
+    
+    #add columns for CDR distances
+    for i in range(len(dist_param_list)):
+        mmseqs_df[f'dist_{i}'] = np.nan
                                                             
     #calculate silhouette score for each clustering
     score_df = []
     for id_col in tqdm(id_cols):
         
-        #get the mmseqs results that are actually relevant to this clustering
-        fam_reps = set(full_df.drop_duplicates(id_col,keep='first')['sequence_id'])
-        mmseqs_subset = mmseqs_df[mmseqs_df['query'].map(lambda x: x in fam_reps)&mmseqs_df['target'].map(lambda x: x in fam_reps)]
+        #get rid of pairs within the same cluster
+        mmseqs_subset = mmseqs_df[mmseqs_df[id_col+'_query']!=mmseqs_df[id_col+'_target']]
         
-        #calculate closest neighbor to each family
-        external_dists = mmseqs_subset.groupby('query')['dist'].min()
+        #take top mmseqs_n MMseqs scores for each query
+        mmseqs_subset = mmseqs_subset.sort_values(by='pident',ascending=False).groupby('query').head(mmseqs_n)
+        
+        #calculate dists as needed
+        dist_idx = int(id_col.split('_')[3])
+        weight_scheme = [1,1,dist_param_list[dist_idx][0]]
+        max_len_diffs = [dist_param_list[dist_idx][1]]*3
+        mmseqs_subset,_ = fill_in_weighted_anarci_dists(mmseqs_subset, all_reps, f'dist_{dist_idx}', weight_scheme, max_len_diffs, pool)
+        
+        #add subset dists to mmseqs_df
+        mmseqs_df.loc[mmseqs_subset.index,f'dist_{dist_idx}'] = mmseqs_subset[f'dist_{dist_idx}']
+        
+        #calculate mean closest neighbor across all family representatives
+        external_dists = mmseqs_subset.loc[mmseqs_subset.groupby('query')[f'dist_{dist_idx}'].idxmin().tolist(),:].groupby(id_col+'_query')[f'dist_{dist_idx}'].mean().reset_index()
 
-        tot_score = 0
-        #for each family, calculate the silhouette
-        for g,group in full_df.groupby(id_col):
-            CDR_list_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in group.iterrows()]
-            
-            #get within-family distances
-            if len(group) > 1:
-                internal_dists = pool.starmap(weighted_anarci_dist,((CDR_list1,CDR_list2,weight_scheme,max_len_diffs) for i,CDR_list1 in enumerate(CDR_list_list[:-1]) for CDR_list2 in CDR_list_list[i+1:]))
-                internal_dists = squareform(internal_dists)
-                internal_score = np.mean(np.max(internal_dists,axis=0)) #this represents the average distance of each sequence to it's furthest family member
-            else:
-                internal_score = 0
-            
-            #add score to total (weighting for size of the family)
-            rep_seq_id = group['sequence_id'].values[0]
-            try: #try getting actual distance
-                tot_score += (external_dists.loc[rep_seq_id] - internal_score)*len(group)
-            except KeyError: #if can't find actual distance, look in broader df
-                print(f"WARNING: can't find representative for family {rep_seq_id} in {id_col} representatives. Using broader set.",flush=True)
-                ext_dist = mmseqs_df.loc[mmseqs_df['query']==rep_seq_id,'dist'].min()
-                
+        #merge closest external dist info onto full_df
+        full_df = full_df.merge(external_dists,left_on=id_col,right_on=id_col+'_query',how='left')
         
-        score_df.append([id_col,tot_score/len(full_df)]) #normalize score to total number of sequences
-        print(f'Score: {id_col}, {tot_score/len(full_df)}',flush=True)
+        #fill in any missing values        
+        missing_idx = full_df[f"dist_{dist_idx}"].isna()
+        if missing_idx.sum():
+            print(f'WARNING: {missing_idx.sum()} sequences in {id_col} are missing nearest external dist info - filling in with dist=1.', flush=True)
+            full_df.loc[missing_idx,f"dist_{dist_idx}"] = 1
+        
+        #score = nearest_external_dist - farthest_internal_dist
+        score = (full_df[f"dist_{dist_idx}"] - full_df[id_col.replace('clone_id','farthest')]).mean()
+        del full_df[f"dist_{dist_idx}"]
+        
+        score_df.append([id_col,score])
+        print(f'Score: {id_col}, {score}',flush=True)
     
     return pd.DataFrame(data=score_df,columns=['name','score'])
+    
+def weighted_ANARCI_silhouette_v2(full_df, id_cols, mmseqs_n, n_reps, dist_param_list, pool, tmp_dir):
+    
+    full_df = full_df.copy()
+    full_df = full_df.sort_values(by='VHH_duplicate_count',ascending=False)
+    
+    #create dataframe to store previously calculated distances
+    dist_df = pd.DataFrame(columns=['query','target']+[f'dist_{i}' for i in range(len(dist_param_list))])
+                                                            
+    #calculate silhouette score for each clustering
+    score_df = []
+    for id_col in tqdm(id_cols):
+        
+        os.mkdir(tmp_dir)
+        
+        #get family reps for families in this clustering
+        reps = full_df.groupby(id_col).head(n_reps).reset_index().set_index('sequence_id')
+        
+        #run MMseqs to find close matches across family representaives
+        with open(f'{tmp_dir}/tmp_silhouette_mmseqs.fasta','w') as f:
+            for i,row in reps.iterrows():
+                f.write(f'>{row.name}\n{row["VHH"]}\n')
+                
+        result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
+                                 'easy-search', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/mmseqs_results', tmp_dir,
+                                 '-s', '7.5', #sensitivity
+                                 '-c', '0', #don't filter on coverage
+                                 '--min-seq-id', '0', #don't filter here because we want to have full distribution info
+                                 '--local-tmp', tmp_dir,
+                                 '--format-output', 'query,target,pident',
+                                 '--max-seq-id','1.0', #do not do any redundancy filtering
+                                 '--max-seqs', str(mmseqs_n+n_reps), #look at best seq for each query (add n_reps to account for finding other sequences representing the same cluster)
+                                 '-v', '0'])
+        assert result.returncode == 0
+                        
+        mmseqs_df = pd.read_csv(f'{tmp_dir}/mmseqs_results',names=['query','target','pident'],sep='\t')
+        
+        #remove tmp files
+        subprocess.run(['rm', '-r', tmp_dir])
+        
+        #merge on clustering info about each query and target
+        mmseqs_df = mmseqs_df.merge(full_df[['sequence_id']+id_cols],left_on='query',right_on='sequence_id',how='left')
+        mmseqs_df = mmseqs_df.merge(full_df[['sequence_id']+id_cols],left_on='target',right_on='sequence_id',how='left',suffixes=('_query','_target'))
+        
+        #get rid of pairs within the same cluster
+        mmseqs_df = mmseqs_df[mmseqs_df[id_col+'_query']!=mmseqs_df[id_col+'_target']]
+        
+        #get any pre-calculated dists
+        mmseqs_df = mmseqs_df.merge(dist_df,on=['query','target'],how='left')
+        
+        #calculate dists as needed
+        dist_idx = int(id_col.split('_')[3])
+        weight_scheme = [1,1,dist_param_list[dist_idx][0]]
+        max_len_diffs = [dist_param_list[dist_idx][1]]*3
+        mmseqs_df,new_dist_idx = fill_in_weighted_anarci_dists(mmseqs_df, reps, f'dist_{dist_idx}', weight_scheme, max_len_diffs, pool)
+        
+        #add new dists to dist_df
+        dist_df = pd.concat([dist_df,mmseqs_df.loc[new_dist_idx,['query','target',f'dist_{dist_idx}']]])
+        
+        #calculate mean closest neighbor across all family representatives
+        external_dists = mmseqs_df.loc[mmseqs_df.groupby('query')[f'dist_{dist_idx}'].idxmin().tolist(),:].groupby(id_col+'_query')[f'dist_{dist_idx}'].mean().reset_index()
+
+        #merge closest external dist info onto full_df
+        full_df = full_df.merge(external_dists,left_on=id_col,right_on=id_col+'_query',how='left')
+        
+        #fill in any missing values        
+        missing_idx = full_df[f"dist_{dist_idx}"].isna()
+        if missing_idx.sum():
+            print(f'WARNING: {missing_idx.sum()} sequences in {id_col} are missing nearest external dist info - filling in with dist=1.', flush=True)
+            full_df.loc[missing_idx,f"dist_{dist_idx}"] = 1
+        
+        #score = nearest_external_dist - farthest_internal_dist
+        score = (full_df[f"dist_{dist_idx}"] - full_df[id_col.replace('clone_id','farthest')]).mean()
+        del full_df[f"dist_{dist_idx}"]
+        
+        score_df.append([id_col,score])
+        print(f'Score: {id_col}, {score}',flush=True)
+    
+    return pd.DataFrame(data=score_df,columns=['name','score'])
+    
+def weighted_ANARCI_silhouette_v3(full_df, id_cols, mmseqs_n, n_reps, max_extra_reps, dist_param_list, pool, tmp_dir):
+    
+    full_df = full_df.copy()
+    full_df = full_df.sort_values(by='VHH_duplicate_count',ascending=False)
+    
+    #cluster the clusterings by top N overlap
+    #get dists
+    clust_dists = np.zeros([len(id_cols)]*2)*np.nan
+    for i,col1 in enumerate(id_cols[:-1]):
+        reps1 = full_df.groupby(col1).head(n_reps)
+        for ii,col2 in enumerate(id_cols[i+1:]):
+            reps2 = full_df.groupby(col2).head(n_reps)
+            new_seqs = len(set(reps1['sequence_id']).symmetric_difference(set(reps2['sequence_id'])))
+            clust_dists[i,ii+i+1] = new_seqs
+            clust_dists[ii+i+1,i] = new_seqs
+    clust_dists[range(len(id_cols)),range(len(id_cols))] = 0
+    
+    #get groupings that are relatively similar to each other
+    labels = agg_clust_to_max_extra_reps(full_df,id_cols,clust_dists,'complete',n_reps,max_extra_reps)
+
+    #pool mmseqs calculations for groups of similar clustering
+    score_df = []
+    for c in np.unique(labels):
+        label_match = labels==c
+        id_col_subset = [col for i,col in enumerate(id_cols) if label_match[i]]
+        
+        all_reps, max_reps = get_fam_reps(id_col_subset,full_df,n_reps)
+        print(f'Collected representatives from all clusterings in group {c}. Total rows: {len(all_reps)}',flush=True)
+        print(f'Across all {len(id_col_subset)} clusterigns in group {c}, the most represetned cluster has {max_reps} representatives (min value was set to {n_reps}).',flush=True)
+        
+        #run MMseqs to find close matches across family representaives
+        os.mkdir(tmp_dir)
+        with open(f'{tmp_dir}/tmp_silhouette_mmseqs.fasta','w') as f:
+            for i,row in all_reps.iterrows():
+                f.write(f'>{row.name}\n{row["VHH"]}\n')
+                
+        result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
+                                 'easy-search', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/mmseqs_results', tmp_dir,
+                                 '-s', '7.5', #sensitivity
+                                 '-c', '0', #don't filter on coverage
+                                 '--min-seq-id', '0', #don't filter here because we want to have full distribution info
+                                 '--local-tmp', tmp_dir,
+                                 '--format-output', 'query,target,pident',
+                                 '--max-seq-id','1.0', #do not do any redundancy filtering
+                                 '--max-seqs', str(mmseqs_n+max_reps), #look at best seq for each query (add n_reps to account for finding other sequences representing the same cluster)
+                                 '-v', '0'])
+        assert result.returncode == 0
+                        
+        mmseqs_df = pd.read_csv(f'{tmp_dir}/mmseqs_results',names=['query','target','pident'],sep='\t')
+        
+        #remove tmp files
+        subprocess.run(['rm', '-r', tmp_dir])
+        
+        #remove matches to self
+        mmseqs_df = mmseqs_df[mmseqs_df['query']!=mmseqs_df['target']]
+        
+        #merge on clustering info about each query and target
+        mmseqs_df = mmseqs_df.merge(full_df[['sequence_id']+id_col_subset],left_on='query',right_on='sequence_id',how='left')
+        mmseqs_df = mmseqs_df.merge(full_df[['sequence_id']+id_col_subset],left_on='target',right_on='sequence_id',how='left',suffixes=('_query','_target'))
+        
+        #add columns for CDR distances
+        for i in range(len(dist_param_list)):
+            mmseqs_df[f'dist_{i}'] = np.nan
+                                                                
+        #calculate silhouette score for each clustering
+        for id_col in tqdm(id_col_subset):
+            
+            #get rid of pairs within the same cluster
+            mmseqs_subset = mmseqs_df[mmseqs_df[id_col+'_query']!=mmseqs_df[id_col+'_target']]
+            
+            #take top mmseqs_n MMseqs scores for each query
+            mmseqs_subset = mmseqs_subset.sort_values(by='pident',ascending=False).groupby('query').head(mmseqs_n)
+            
+            #calculate dists as needed
+            dist_idx = int(id_col.split('_')[3])
+            weight_scheme = [1,1,dist_param_list[dist_idx][0]]
+            max_len_diffs = [dist_param_list[dist_idx][1]]*3
+            mmseqs_subset,_ = fill_in_weighted_anarci_dists(mmseqs_subset, all_reps, f'dist_{dist_idx}', weight_scheme, max_len_diffs, pool)
+            
+            #add subset dists to mmseqs_df
+            mmseqs_df.loc[mmseqs_subset.index,f'dist_{dist_idx}'] = mmseqs_subset[f'dist_{dist_idx}']
+            
+            #calculate mean closest neighbor across all family representatives
+            external_dists = mmseqs_subset.loc[mmseqs_subset.groupby('query')[f'dist_{dist_idx}'].idxmin().tolist(),:].groupby(id_col+'_query')[f'dist_{dist_idx}'].mean().reset_index()
+    
+            #merge closest external dist info onto full_df
+            full_df = full_df.merge(external_dists,left_on=id_col,right_on=id_col+'_query',how='left')
+            
+            #fill in any missing values        
+            missing_idx = full_df[f"dist_{dist_idx}"].isna()
+            if missing_idx.sum():
+                print(f'WARNING: {missing_idx.sum()} sequences in {id_col} are missing nearest external dist info - filling in with dist=1.', flush=True)
+                full_df.loc[missing_idx,f"dist_{dist_idx}"] = 1
+            
+            #score = nearest_external_dist - farthest_internal_dist
+            score = (full_df[f"dist_{dist_idx}"] - full_df[id_col.replace('clone_id','farthest')]).mean()
+            del full_df[f"dist_{dist_idx}"]
+            
+            score_df.append([id_col,score])
+            print(f'Score: {id_col}, {score}',flush=True)
+    
+    return pd.DataFrame(data=score_df,columns=['name','score'])
+    
+def fill_in_weighted_anarci_dists(dist_df, info_df, dist_col, weight_scheme, max_len_diffs, pool):
+    
+    missing_idx = dist_df[dist_col].isna()
+    if missing_idx.sum():
+        print(f'Filling in {missing_idx.sum()}/{len(dist_df)} missing dists.',flush=True)
+        dist_df.loc[missing_idx,dist_col] = pool.starmap(weighted_anarci_dist,((info_df.loc[row['query'],['CDR1','CDR2','CDR3']].tolist(),
+                                                                                info_df.loc[row['target'],['CDR1','CDR2','CDR3']].tolist(),
+                                                                                weight_scheme,
+                                                                                max_len_diffs) for i,row in dist_df[missing_idx].iterrows()),chunksize=1000)
+    return dist_df,missing_idx
+    
+def agg_clust_to_max_extra_reps(df,id_cols,dists,method,n_reps,max_extra_reps):
+    
+    #find how many extra reps are necessary with this group of columns
+    _, max_reps = get_fam_reps(id_cols,df,n_reps)
+    print(f'{len(id_cols)} columns with max_reps={max_reps}',flush=True)
+    
+    # if too many extra reps are needed, recursively split into smaller groups
+    if max_reps > max_extra_reps:
+        #cluster into 2 groups
+        clusterer = AgglomerativeClustering(n_clusters=2,metric='precomputed',linkage=method)
+        labels = clusterer.fit_predict(dists)
+        
+        print(f'\t split into {np.sum(labels==0)} and {np.sum(labels==1)} columns',flush=True)
+        
+        #send each subgroup into recursive clustering
+        new_labels = np.zeros(labels.shape)
+        for l in range(2):
+            label_match = labels==l
+            col_subset = [col for i,col in enumerate(id_cols) if label_match[i]]
+            dist_subset = dists[:,label_match][label_match,:]
+            split_labels = agg_clust_to_max_extra_reps(df,col_subset,dist_subset,method,n_reps,max_extra_reps)
+            new_labels[label_match] = split_labels + np.max(new_labels) + 1
+            
+        return new_labels
+    
+    #otherwise keep labels as-is
+    else:
+        return np.zeros(len(id_cols))
+
+def get_fam_reps(id_cols,df,n_reps):
+    #collect set of all possible family representatives
+    all_reps = pd.DataFrame()
+    for id_col in id_cols:
+        id_reps = df.groupby(id_col).head(n_reps)
+        all_reps = pd.concat([all_reps,id_reps],axis=0).drop_duplicates('VHH')
+    all_reps = all_reps.set_index('sequence_id')
+
+    #figure out largest number of reps for a cluster in any clustering
+    max_reps = 0
+    for id_col in id_cols:
+        max_reps = max(max_reps,all_reps.groupby(id_col).size().max())
+
+    return all_reps, max_reps
 
 def recursive_mmseqs_split(group, max_group_size, min_id, id_step, method, tmp_dir, ncpus):
     

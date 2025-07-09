@@ -19,8 +19,6 @@ from tqdm import tqdm
 sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
 from python_utils import *
 
-mmseqs_path = "/cluster/tufts/cowenlab/emosel01/condaenv/vhh/bin/mmseqs" #note that this is Ned's mmseqs because of version issues
-
 # get command line args
 args = sys.argv
 
@@ -106,7 +104,7 @@ for f in data['clone_id'].unique():
                 fasta.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
                 
         mmseqs_cmds.append([
-            mmseqs_path, 
+            'singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
             'easy-cluster', '-v', '2', '--min-seq-id', '0.90',
             fasta_name,
             f'{root_path}{tmp_name}/mmseqs/clone_{f}',
@@ -236,7 +234,7 @@ if len(outliers):
                     fasta.write(f'>{row["sequence_id"]}\n{row["VHH"]}\n')
                     
             mmseqs_cmds.append([
-                mmseqs_path, 
+                'singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
                 'easy-cluster', '-v', '2', '--min-seq-id', '0.90',
                 fasta_name,
                 f'{root_path}{tmp_name}/mmseqs/clone_{f}',

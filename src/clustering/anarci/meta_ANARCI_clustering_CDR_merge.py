@@ -40,12 +40,12 @@ parser.add_argument('--max_end_scan',type=int,default=40,help='Number of C-term 
 #clustering args
 parser.add_argument('--max_subgroup_size',type=int,default=25000,help='Maximum number of VHHs in a SCOPer (sub)group before triggering a recursive loose mmseqs sub-clustering.')
 parser.add_argument('--recursive_min_id_start',type=float,nargs=2,default=[0.5,0.8],help='Inclusive bounds for range of starting values for minimum sequence identity allowed for recursive loose mmseqs clustering.')
-parser.add_argument('--recursive_min_id_start_N',type=int,default=3,help='Number of values to test between the recursive_min_id_start bounds.')
+parser.add_argument('--recursive_min_id_start_N',type=int,default=5,help='Number of values to test between the recursive_min_id_start bounds.')
 parser.add_argument('--recursive_min_id_step',type=float,default=0.025,help='Step size value for minimum sequence identity incerment in each recursive layer.')
 
 parser.add_argument('--recursive_method',type=str,nargs='*',default=['setcover'],help='Method to use for clustering in the recursive mmseqs clustering (setcover or conncomp).')
 
-parser.add_argument('--CDR3_weight',type=float,nargs=2,default=[3.3,3.3], help='Inclusive bounds for the weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
+parser.add_argument('--CDR3_weight',type=float,nargs=2,default=[3,3], help='Inclusive bounds for the weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
 parser.add_argument('--CDR3_weight_N',type=int,default=1,help='Number of values to test between the CDR3_weight bounds.')
 
 parser.add_argument('--max_len_diff',type=int,nargs=2,default=[3,3], help='Inclusive bounds for the range of values of maximum allowed difference in CDR length.')
@@ -53,8 +53,8 @@ parser.add_argument('--max_len_diff_N',type=int,default=1,help='Number of values
 
 parser.add_argument('--linkage',type=str,default=['single','average','complete'],nargs='+',help='The linkage methods to try in weighted hierarchical clustering step (can be single, complete, or average).')
 
-parser.add_argument('--weighted_min_id',type=float,nargs=2,default=[0.3,0.7],help='Inclusinve bounds for the range of distance cutoff values to use in the weighted hierarchical clustering step.')
-parser.add_argument('--weighted_min_id_N',type=int,default=3,help='Number of values to test between the weighted_min_id bounds.')
+parser.add_argument('--weighted_min_id',type=float,nargs=2,default=[0.4,0.8],help='Inclusinve bounds for the range of distance cutoff values to use in the weighted hierarchical clustering step.')
+parser.add_argument('--weighted_min_id_N',type=int,default=5,help='Number of values to test between the weighted_min_id bounds.')
 
 parser.add_argument('--final_merge_method',type=str,default=['complete'],nargs='+',help='The linkage method(s) to use in the final CDR-based merge.')
 
@@ -71,7 +71,7 @@ parser.add_argument('--sample_N_pairs',type=int,default=1000,help='When calculat
 # parser.add_argument('--min_cluster_size_shortcut',type=int,default=300,help='When updating intra-family distances during merge step, shortcut the calculation for each merge where both clusters are larger than min_cluster_size_shortcut.')
 
 #metaclusterign args
-parser.add_argument('--meta_min_id',type=float,default=[0.35],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')
+parser.add_argument('--meta_min_id',type=float,default=[0.55],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')
 parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
 
 def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):

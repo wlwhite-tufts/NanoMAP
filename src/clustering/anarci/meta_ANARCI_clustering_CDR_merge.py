@@ -494,6 +494,8 @@ if __name__ == '__main__':
     print(f'Connected to pool with {ncpus} cpus.',flush=True)
     
     #parse output folder anf file names
+    if args.out_file[0] != '/':
+        args.out_file = './'+args.out_file
     out_dir = '/'.join(args.out_file.split('/')[:-1])+'/'
     print('out_dir = ',out_dir)
     out_fname = args.out_file.split('/')[-1]

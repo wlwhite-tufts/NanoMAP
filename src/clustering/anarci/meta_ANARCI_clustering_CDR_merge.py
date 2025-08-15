@@ -19,7 +19,7 @@ sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/ut
 from python_utils import *
 sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src')
 from clustering.anarci.meta_ANARCI_clustering_alt_edit import collect_seqs, annotate_and_filter_seqs
-from analysis.sequence_silhouette_score import weighted_ANARCI_silhouette
+from analysis.sequence_silhouette_score_faster import weighted_ANARCI_silhouette
 
 #get user inputs
 parser = argparse.ArgumentParser(prog='Cluster Based on ANARCI alignment',
@@ -371,7 +371,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     if args.score_fraction < 1:
         
         dist_param_map = {col:tuple(cdr3_dist_combos[int(col.split('_')[3])]) for col in id_cols}
-        score_df = weighted_ANARCI_silhouette(vhh, id_cols, args.score_top_N, args.min_clust_reps, args.max_extra_reps, dist_param_map, args.sample_N_pairs, pool, ncpus, tmp_dir+'_mmseqs')
+        score_df = weighted_ANARCI_silhouette(vhh, id_cols, dist_param_map, args.sample_N_pairs, pool, ncpus)
 
         score_df = pd.DataFrame(score_df,columns=['name','score']).sort_values(by='score',ascending=False)
         score_df = score_df.head(int(len(score_df)*args.score_fraction))

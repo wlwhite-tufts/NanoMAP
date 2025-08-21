@@ -9,6 +9,7 @@ from tqdm import tqdm
 import argparse
 from scipy.spatial.distance import squareform
 from functools import partial
+import dask.dataframe as dd
 
 sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/')
 from src.utils.python_utils import weighted_anarci_dist, get_anarci_alignment
@@ -34,6 +35,7 @@ def weighted_ANARCI_silhouette(full_df, id_cols, dist_param_map, sample_N_pairs,
     
     full_df = full_df.copy().sort_values(by='VHH_duplicate_count',ascending=False)
     fill_df = full_df.set_index('sequence_id')
+    full_df = dd.from_pandas(full_df,sort=False)
     
     #find possible dist param sets
     dist_param_list = list(set((tuple(params) for params in dist_param_map.values())))

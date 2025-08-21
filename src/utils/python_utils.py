@@ -520,10 +520,10 @@ def translate_VHH_end_scan(dna,start_aa,end_aa,start_cap,end_cap):
 def translate_wrapper(args):
     return translate_VHH_end_scan(*args)
     
-def get_anarci_alignment(seq):
+def get_anarci_alignment(seq,hmmer_path=''):
     
     sequences = [('id',seq)]
-    numbering, _, _ = anarci(sequences, scheme="imgt", output=False, allowed_species=['alpaca'])
+    numbering, _, _ = anarci(sequences, scheme="imgt", output=False, allowed_species=['alpaca'], hmmerpath=hmmer_path)
     
     assert len(numbering)==1 #only one sequence result
     
@@ -613,6 +613,41 @@ def weighted_anarci_dist_index(idx1,idx2,df,weight_scheme,max_len_diffs):
     cdr_list1 = df.loc[idx1[0],['CDR1','CDR2','CDR3']].tolist()
     cdr_list2 = df.loc[idx2[0],['CDR1','CDR2','CDR3']].tolist()
     return weighted_anarci_dist(cdr_list1,cdr_list2,weight_scheme,max_len_diffs)
+
+def weighted_anarci_dist_all_pairs(CDR_list1, CDR_list2, same, weight_scheme, max_len_diffs):
+    #if given two lists, compare all cross-list pairs
+    if not same:
+        dists = np.zeros([len(CDR_list1),len(CDR_list2)])*np.nan
+        for i,cdrs1 in enumerate(CDR_list1):
+            for ii,cdrs2 in enumerate(CDR_list2):
+                dists[i,ii] = weighted_anarci_dist(cdrs1,cdrs2,weight_scheme,max_len_diffs)
+    #otherwise, compare all pairs within the single list
+    else:
+        dists = np.zeros([len(CDR_list1)]*2)*np.nan
+        for i,cdrs1 in enumerate(CDR_list1[:-1]):
+            for ii,cdrs2 in enumerate(CDR_list1[i+1:]):
+                dists[i,ii+i+1] = weighted_anarci_dist(cdrs1,cdrs2,weight_scheme,max_len_diffs)
+        dists[np.diag_indices(dists.shape[0])] = 0
+                
+    return dists
+    
+def batched_pairwise_weighted_anarci_dist(CDR_list, batch_size, weight_scheme, max_len_diffs, pool):
+    N_seqs = len(CDR_list)
+    
+    N_batches = int(np.ceil(N_seqs/batch_size))
+    batches = ([CDR_list[b1*batch_size:(b1+1)*batch_size], CDR_list[b2*batch_size:(b2+1)*batch_size], b1==b2] for b1 in range(N_batches) for b2 in range(b1,N_batches))
+    dist_batches = pool.starmap(partial(weighted_anarci_dist_all_pairs,
+                                        weight_scheme=weight_scheme,
+                                        max_len_diffs=max_len_diffs), batches)
+    dists = np.zeros([N_seqs]*2)*np.nan
+    i = 0
+    for b1 in range(N_batches):
+        for b2 in range(b1,N_batches):
+            dists[b1*batch_size:(b1+1)*batch_size,b2*batch_size:(b2+1)*batch_size] = dist_batches[i]
+            i+=1
+    idxs = np.tril_indices(dists.shape[0], k=-1)
+    dists[idxs] = dists.T[idxs]
+    return dists
     
 def fill_in_weighted_anarci_dists(dist_df, info_df, dist_col, weight_scheme, max_len_diff, pool, ncpus):
     

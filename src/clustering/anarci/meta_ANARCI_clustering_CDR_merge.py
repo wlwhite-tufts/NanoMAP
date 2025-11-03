@@ -67,8 +67,6 @@ parser.add_argument('--score_top_N',type=int,default=10,help='When calculating i
 parser.add_argument('--min_clust_reps',type=int,default=10,help='When calculating inter-family distances, select at least the top min_clust_reps most abundant members to represent each family.')
 parser.add_argument('--max_extra_reps',type=int,default=150,help='When calculating inter-family distances, split clusterings into groups of no more than max_group_size members based on the overlap of their representatives.')
 parser.add_argument('--sample_N_pairs',type=int,default=1000,help='When calculating intra-family distances, calcualte weighted distances for a random sampling of sample_N_pairs pairs of sequences within the cluster.')
-# parser.add_argument('--min_id_for_approx_dist',type=float,default=0.9,help='When updating intra-family distances during merge step, use this fraction identity cutoff in mmseqs clusteing to find cluster representatives.')
-# parser.add_argument('--min_cluster_size_shortcut',type=int,default=300,help='When updating intra-family distances during merge step, shortcut the calculation for each merge where both clusters are larger than min_cluster_size_shortcut.')
 
 #metaclusterign args
 parser.add_argument('--meta_min_id',type=float,default=[0.25],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')

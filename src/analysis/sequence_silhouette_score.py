@@ -24,7 +24,7 @@ parser.add_argument('--drop_duplicates',type=str,default='VHH',help='Which colum
 
 
 #distance function args
-parser.add_argument('--CDR3_weight',type=float,default=3.3, help='Weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
+parser.add_argument('--CDR3_weight',type=float,default=3, help='Weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
 parser.add_argument('--max_len_diff',type=int,default=3, help='Maximum allowed difference in CDR length. Distance is set to 1 if this is exceeded.')
 
 #scoring args

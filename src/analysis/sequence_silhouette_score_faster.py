@@ -42,6 +42,8 @@ def weighted_ANARCI_silhouette(full_df, id_cols, dist_param_map, sample_N_pairs,
     
     #calculate silhouette score for each clustering
     for id_col in tqdm(id_cols):
+        #pre-group for fast group access
+        grouped_df = full_df.groupby(id_col)
         
         #get first sample in each pair to calculate dists
         internal = full_df.sample(sample_N_pairs,replace=True)
@@ -52,13 +54,13 @@ def weighted_ANARCI_silhouette(full_df, id_cols, dist_param_map, sample_N_pairs,
         #get second sample in each pair
         groups = []
         for g,group in internal.groupby(id_col):
-            group['partner'] = full_df[full_df[id_col]==g].sample(len(group),replace=True).index
+            group['partner'] = grouped_df.get_group(g).sample(len(group),replace=True).index
             groups.append(group)
         internal = pd.concat(groups,axis=0)
         
         groups = []
         for g,group in external.groupby(id_col):
-            group['partner'] = full_df[full_df[id_col]!=g].sample(len(group),replace=True).index
+            group['partner'] = grouped_df.filter(lambda x: x.name != g).sample(len(group),replace=True).index
             groups.append(group)
         external = pd.concat(groups,axis=0)
             

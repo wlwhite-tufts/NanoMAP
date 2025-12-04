@@ -11,7 +11,7 @@
 
 PRESTO_BIN=/cluster/tufts/cowenlab/immcantation_suite/presto/bin
 CHANGEO_BIN=/cluster/tufts/cowenlab/immcantation_suite/changeo/bin
-NCBI_DIR=/cluster/tufts/cowenlab/wwhite06/packages/igblast/ncbi-igblast-1.22.0
+NCBI_DIR=/cluster/tufts/cowenlab/wwhite06/packages/igblast_v3/ncbi-igblast-1.22.0
 
 IN_DIR="$1"
 OUT_DIR="$2"

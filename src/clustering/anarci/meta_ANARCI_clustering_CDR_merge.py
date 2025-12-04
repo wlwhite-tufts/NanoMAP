@@ -41,7 +41,7 @@ parser.add_argument('--max_end_scan',type=int,default=40,help='Number of C-term 
 parser.add_argument('--max_subgroup_size',type=int,default=25000,help='Maximum number of VHHs in a SCOPer (sub)group before triggering a recursive loose mmseqs sub-clustering.')
 parser.add_argument('--recursive_min_id_start',type=float,nargs=2,default=[0.5,0.8],help='Inclusive bounds for range of starting values for minimum sequence identity allowed for recursive loose mmseqs clustering.')
 parser.add_argument('--recursive_min_id_start_N',type=int,default=5,help='Number of values to test between the recursive_min_id_start bounds.')
-parser.add_argument('--recursive_min_id_step',type=float,default=0.025,help='Step size value for minimum sequence identity incerment in each recursive layer.')
+parser.add_argument('--recursive_min_id_step',type=float,default=0.035,help='Step size value for minimum sequence identity incerment in each recursive layer.')
 
 parser.add_argument('--recursive_method',type=str,nargs='*',default=['setcover'],help='Method to use for clustering in the recursive mmseqs clustering (setcover or conncomp).')
 
@@ -60,6 +60,8 @@ parser.add_argument('--final_merge_method',type=str,default=['complete'],nargs='
 
 parser.add_argument('--final_min_id',type=float,nargs=2,default=[0.75,0.95],help='Inclusinve bounds for the range of distance cutoff values to use in the final merge step.')
 parser.add_argument('--final_min_id_N',type=int,default=3,help='Number of values to test between the final_min_id bounds.')
+
+parser.add_argument('--dist_batch_size',type=int,default=1000,help='When calculating all pairwise distances between sequences in a set, break the calculation into sets of dist_batch_size (so that dist_batch_size**2 distances are calculated per batch).')
 
 #scoring args
 parser.add_argument('--score_fraction',type=float,default=0.5,help='Keep the top score_fraction of individual clusterings. Only these clusterings are used in metaclustering.')
@@ -236,7 +238,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
                     else:
                         #get dist matrix
                         CDR_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in mmseqs_group.iterrows()]
-                        dists = np.array(pool.map(partial(ANARCI_dist_row,CDR_list_list=CDR_list,weight_scheme=[1,1,dist_params[0]],max_len_diffs=[dist_params[1]]*3),CDR_list))
+                        dists = batched_pairwise_weighted_anarci_dist(CDR_list, args.dist_batch_size, [1,1,dist_params[0]], [dist_params[1]]*3, pool)
 
                         #try all clustering param combos
                         for clust_idx,clust_params in enumerate(weighted_clustering_combos):
@@ -288,7 +290,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
         
         #calculate pairwise distances between group reps
         CDR_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in rep_seqs.iterrows()]
-        dists = np.array(pool.map(partial(ANARCI_dist_row,CDR_list_list=CDR_list,weight_scheme=[1,1,np.mean(args.CDR3_weight)],max_len_diffs=[np.mean(args.max_len_diff)]*3),CDR_list))
+        dists = batched_pairwise_weighted_anarci_dist(CDR_list, args.dist_batch_size, [1,1,np.mean(args.CDR3_weight)], [np.mean(args.max_len_diff)]*3, pool)
 
         #try each requested merge min_id and method
         for merge_idx,(merge_method, merge_min_id) in enumerate(final_merge_combos):

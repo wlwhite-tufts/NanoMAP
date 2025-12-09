@@ -32,8 +32,7 @@ parser.add_argument('--sample_N_pairs',type=int,default=10000,help='When calcula
 
 def weighted_ANARCI_silhouette(full_df, id_cols, dist_param_map, sample_N_pairs, pool, ncpus):
     
-    full_df = full_df.copy().sort_values(by='VHH_duplicate_count',ascending=False)
-    fill_df = full_df.set_index('sequence_id')
+    full_df = full_df.set_index('sequence_id')
     
     #find possible dist param sets
     dist_param_list = list(set((tuple(params) for params in dist_param_map.values())))
@@ -42,42 +41,69 @@ def weighted_ANARCI_silhouette(full_df, id_cols, dist_param_map, sample_N_pairs,
     
     #calculate silhouette score for each clustering
     for id_col in tqdm(id_cols):
-        #pre-group for fast group access
-        grouped_df = full_df.groupby(id_col)
         
-        #get first sample in each pair to calculate dists
-        internal = full_df.sample(sample_N_pairs,replace=True)
-        internal['partner'] = ''
-        external = full_df.sample(sample_N_pairs,replace=True)
-        external['partner'] = ''
+        N_full = len(full_df)
+        N_fam = len(full_df[id_col].unique())
         
-        #get second sample in each pair
-        groups = []
-        for g,group in internal.groupby(id_col):
-            group['partner'] = grouped_df.get_group(g).sample(len(group),replace=True).index
-            groups.append(group)
-        internal = pd.concat(groups,axis=0)
-        
-        groups = []
-        for g,group in external.groupby(id_col):
-            group['partner'] = grouped_df.filter(lambda x: x.name != g).sample(len(group),replace=True).index
-            groups.append(group)
-        external = pd.concat(groups,axis=0)
+        if N_fam == 1: #edge case for one giant family
+            internal = np.random.randint(N_full,size=[sample_N_pairs,2])
+            internal_dists = pool.starmap(partial(weighted_anarci_dist,
+                                                  weight_scheme=weight_scheme,
+                                                  max_len_diffs=max_len_diff),
+                                          ([full_df.iloc[internal[i,0],:].loc[['CDR1','CDR2','CDR3']].tolist(),full_df.iloc[internal[i,1],:].loc[['CDR1','CDR2','CDR3']].tolist()] for i in range(sample_N_pairs)))
+            external_dists = 0
             
-        weight_scheme = [1,1,dist_param_map[id_col][0]]
-        max_len_diff = [dist_param_map[id_col][1]]*3
+        elif N_fam == N_full: #edge case for all separate families
+            external = np.random.randint(N_full,size=[sample_N_pairs,2])
+            external_dists = pool.starmap(partial(weighted_anarci_dist,
+                                                  weight_scheme=weight_scheme,
+                                                  max_len_diffs=max_len_diff),
+                                          ([full_df.iloc[external[i,0],:].loc[['CDR1','CDR2','CDR3']].tolist(),full_df.iloc[external[i,1],:].loc[['CDR1','CDR2','CDR3']].tolist()] for i in range(sample_N_pairs)))
+            internal_dists = 1
+            
+        else: #main case - sample randim pairs untul there are enough of each type
+            N_ext = 0
+            N_int = 0
+            internal = np.zeros([sample_N_pairs,2])
+            external = np.zeros([sample_N_pairs,2])
+            while N_ext < sample_N_pairs:
+                sample = np.random.randint(N_full,size=[sample_N_pairs,2])
+                match = full_df[id_col].iloc[sample[:,0]].values == full_df[id_col].iloc[sample[:,1]].values
+                
+                N_match = match.sum()
+                N_nonmatch = sample_N_pairs - N_match
+                
+                internal[min(N_int,sample_N_pairs):min(N_int+N_match,sample_N_pairs),:] = sample[match,:][:max(0,min(N_match,sample_N_pairs-N_int)),:]
+                external[min(N_ext,sample_N_pairs):min(N_ext+N_nonmatch,sample_N_pairs),:] = sample[~match,:][:max(0,min(N_nonmatch,sample_N_pairs-N_ext)),:]
+                
+                N_int += N_match
+                N_ext += N_nonmatch
+                
+            while N_int < sample_N_pairs:
+                sample = np.random.randint(N_full,size=[sample_N_pairs,2])
+                match = full_df[id_col].iloc[sample[:,0]].values == full_df[id_col].iloc[sample[:,1]].values
+                
+                N_match = match.sum()
+                internal[N_int:min(N_int+N_match,sample_N_pairs),:] = sample[match,:][:min(N_match,sample_N_pairs-N_int),:]
+                N_int += N_match
+            
+            internal = internal.astype(int)
+            external = external.astype(int)
+                
+            weight_scheme = [1,1,dist_param_map[id_col][0]]
+            max_len_diff = [dist_param_map[id_col][1]]*3
+            
+            internal_dists = pool.starmap(partial(weighted_anarci_dist,
+                                                    weight_scheme=weight_scheme,
+                                                    max_len_diffs=max_len_diff),
+                                            ([full_df.iloc[internal[i,0],:].loc[['CDR1','CDR2','CDR3']].tolist(),full_df.iloc[internal[i,1],:].loc[['CDR1','CDR2','CDR3']].tolist()] for i in range(sample_N_pairs)))
+                                          
+            external_dists = pool.starmap(partial(weighted_anarci_dist,
+                                                    weight_scheme=weight_scheme,
+                                                    max_len_diffs=max_len_diff),
+                                            ([full_df.iloc[external[i,0],:].loc[['CDR1','CDR2','CDR3']].tolist(),full_df.iloc[external[i,1],:].loc[['CDR1','CDR2','CDR3']].tolist()] for i in range(sample_N_pairs)))
         
-        internal['dist'] = pool.starmap(partial(weighted_anarci_dist,
-                                                weight_scheme=weight_scheme,
-                                                max_len_diffs=max_len_diff),
-                                        ([row[['CDR1','CDR2','CDR3']].tolist(),full_df.loc[row['partner'],['CDR1','CDR2','CDR3']].tolist()] for _,row in internal.iterrows()))
-                                      
-        external['dist'] = pool.starmap(partial(weighted_anarci_dist,
-                                                weight_scheme=weight_scheme,
-                                                max_len_diffs=max_len_diff),
-                                        ([row[['CDR1','CDR2','CDR3']].tolist(),full_df.loc[row['partner'],['CDR1','CDR2','CDR3']].tolist()] for _,row in external.iterrows()))
-        
-        score = external['dist'].mean() - internal['dist'].mean()
+        score = np.mean(external_dists) - np.mean(internal_dists)
 
         score_df.append([id_col,score])
         print(f'Score: {id_col}, {score}',flush=True)

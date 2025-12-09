@@ -120,7 +120,7 @@ def annotate_and_filter_seqs(args, data, pool, ncpus, agg_funcs):
     print(f'{len(data)} sequences passed translation and motif filtering.', flush=True)
 
     # Compute VHH-level duplicate counts and merge
-    vhh_counts = data.groupby('VHH')['duplicate_count'].sum().rename('VHH_duplicate_count').reset_index()
+    vhh_counts = data.groupby('VHH',sort=False)['duplicate_count'].sum().rename('VHH_duplicate_count').reset_index()
     data = data.merge(vhh_counts, on='VHH')
 
     # Drop singleton VHHs
@@ -199,7 +199,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     
     #cluster within SCOPer groups
     min_id = defaultdict(int)
-    for g,scoper_group in vhh.groupby(by='scoper_group'):
+    for g,scoper_group in vhh.groupby(by='scoper_group',sort=False):
         
         #try all recursive_min_id values for this SCOPer group
         for rec_idx,rec_params in enumerate(recursive_min_id_vals):
@@ -210,7 +210,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
             scoper_group, max_min_id = recursive_mmseqs_split(scoper_group, args.max_subgroup_size, rec_min_id, args.recursive_min_id_step, rec_method, tmp_dir, ncpus)
             
             #cluster by weighted CDR distance within each broad mmseqs cluster
-            for mm_id,mmseqs_group in tqdm(scoper_group.groupby('mmseqs_id')):
+            for mm_id,mmseqs_group in tqdm(scoper_group.groupby('mmseqs_id',sort=False)):
                 
                 #try all CDR3 weight values
                 for cdr_idx,dist_params in enumerate(cdr3_dist_combos):
@@ -280,40 +280,81 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     
     id_cols = [col for col in vhh.columns if 'clone_id' in col]
     
+    #sort vhhs by duplicate count so drop duplicates will keep the most abundant ones
+    vhh = vhh.sort_values(by='VHH_duplicate_count',ascending=False)
+    
+    #gather all representatives of all clusters
+    rep_seqs_master = pd.DataFrame(columns=vhh.columns)
+    for id_col in id_cols:
+        rep_seqs_master = pd.concat([rep_seqs_master,vhh.drop_duplicates(id_col,keep='first')]).drop_duplicates('sequence_id')
+    rep_seqs_master.reset_index(inplace=True,drop=True)
+
+    #split into rough groups with mmseqs
+    rep_seqs_master = run_mmseqs_clust(rep_seqs_master,
+                                       args.final_min_id[0], #use the lowest merge value, to be safe (full seq id used here should be higher than CDR dist anyway)
+                                       'conncomp', tmp_dir, ncpus)
+    
+    rep_groups = rep_seqs_master.groupby('mmseqs_id',sort=False)
+    rep_sizes = rep_groups.size()
+    print(f'Split {len(rep_seqs_master)} cluster representatives into {len(rep_sizes)} groups, with max size = {rep_sizes.max()}.',flush=True)
+                                
+    #calculate all pairwise distances within mmseqs groups
+    dist_dict = {}
+    for mm_id,mmseqs_group in tqdm(rep_groups):
+        if len(mmseqs_group) > 1:
+            CDR_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in mmseqs_group.iterrows()]
+            dists = batched_pairwise_weighted_anarci_dist(CDR_list, args.dist_batch_size, [1,1,np.mean(args.CDR3_weight)], [np.mean(args.max_len_diff)]*3, pool)
+            
+            #convert to DataFrame
+            dists = pd.DataFrame(dists,index=mmseqs_group['sequence_id'],columns=mmseqs_group['sequence_id'])
+            dist_dict[mm_id] = dists
+    
     #for each of the above clusterings ... try all requested merging values
     for id_col in tqdm(id_cols):
+        rep_seqs = rep_seqs_master.drop_duplicates(id_col,keep='first').copy()
         
-        # dist_col = id_col.replace('clone_id','farthest')
-        
-        #get group representatives (most abundant member of each group)
-        rep_seqs = vhh.sort_values(by='VHH_duplicate_count',ascending=False)[[id_col,'CDR1','CDR2','CDR3']].groupby(id_col).first().reset_index()
-        
-        #calculate pairwise distances between group reps
-        CDR_list = [row[['CDR1','CDR2','CDR3']].tolist() for _,row in rep_seqs.iterrows()]
-        dists = batched_pairwise_weighted_anarci_dist(CDR_list, args.dist_batch_size, [1,1,np.mean(args.CDR3_weight)], [np.mean(args.max_len_diff)]*3, pool)
-
-        #try each requested merge min_id and method
-        for merge_idx,(merge_method, merge_min_id) in enumerate(final_merge_combos):
+        min_id = defaultdict(int)
+        #merge within each mmseqs group
+        for mm_id,mmseqs_group in rep_seqs.groupby('mmseqs_id',sort=False):
             
-            #get labels
-            clusterer = AgglomerativeClustering(metric='precomputed',
-                                                linkage=merge_method,
-                                                distance_threshold=1-merge_min_id,
-                                                n_clusters=None)
-            rep_seqs.loc[:,f'{id_col}_{merge_idx}'] = clusterer.fit_predict(dists)
+            #skip clustering if group size is 1
+            if len(mmseqs_group) == 1:
+                for merge_idx,(merge_method, merge_min_id) in enumerate(final_merge_combos):
+                    rep_seqs.loc[mmseqs_group.index,f'{id_col}_{merge_idx}'] = min_id[(merge_method, merge_min_id)]
+                    min_id[(merge_method, merge_min_id)] += 1
+            else:
+                #look up reelvant dists in pre-calculated dict
+                dists = dist_dict[mm_id].loc[mmseqs_group['sequence_id'],mmseqs_group['sequence_id']]
+        
+                #try each requested merge min_id and method
+                for merge_idx,(merge_method, merge_min_id) in enumerate(final_merge_combos):
+                    
+                    #get labels
+                    clusterer = AgglomerativeClustering(metric='precomputed',
+                                                        linkage=merge_method,
+                                                        distance_threshold=1-merge_min_id,
+                                                        n_clusters=None)
+                    #insert labels
+                    labels = clusterer.fit_predict(dists.to_numpy(copy=True)) + min_id[(merge_method, merge_min_id)]
+                    rep_seqs.loc[mmseqs_group.index,f'{id_col}_{merge_idx}'] = labels
+                    
+                    #update min_id for next group
+                    min_id[(merge_method, merge_min_id)] = rep_seqs[f'{id_col}_{merge_idx}'].max() + 1
         
         #merge on final cluster info
         vhh = vhh.merge(rep_seqs[[id_col]+[f'{id_col}_{merge_idx}' for merge_idx in range(len(final_merge_combos))]],on=id_col,how='left')
                 
-        #delete original column and related furthest distance column since it is no longer needed
+        #delete original column since it is no longer needed
         del vhh[id_col]
-        # del vhh[dist_col]
-        
+
         #defragment by copying df (and reset index)
         vhh = vhh.copy()
     
     #reset index
     vhh = vhh.reset_index(drop=False)
+    
+    #free up some memory
+    del dist_dict
     
     #save checkpoint
     vhh.to_csv(f'{tmp_dir}/intermediate.csv')
@@ -345,7 +386,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     #############
     
     #group all VHHs that are always clustered together
-    for i,(g,group) in enumerate(vhh.groupby(by=keep_cols)):
+    for i,(g,group) in enumerate(vhh.groupby(by=keep_cols,sort=False)):
         vhh.loc[group.index,'fine_clone_id'] = i
     print(f'{len(vhh["fine_clone_id"].unique())} tight clusters found.',flush=True)
     
@@ -353,10 +394,10 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     
     #get distances between fine clusters
     #only need to compare one from each group because all within group are the same
-    group_reps = vhh.drop_duplicates('fine_clone_id')
+    group_reps = vhh.drop_duplicates('fine_clone_id').copy()
     #run clustering
     for method in args.meta_method:
-        links = linkage(group_reps[keep_cols].values,method=method,metric='hamming')
+        links = linkage(group_reps[keep_cols].to_numpy(copy=True),method=method,metric='hamming')
         for min_id in tqdm(args.meta_min_id):
             labels = fcluster(links,criterion='distance',t=1-min_id)
             group_reps.loc[:,f'meta_clone_id_{method}_{min_id}'] = labels

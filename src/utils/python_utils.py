@@ -756,15 +756,54 @@ def approx_avg_internal_anarci_dist(df,n_sample,cdr_weights,max_len_diff,pool):
                                                     cdr_weights,
                                                     max_len_diff) for pair in cdr_pairs))
     return np.mean(dists)
-
-def recursive_mmseqs_split(group, max_group_size, min_id, id_step, method, tmp_dir, ncpus):
+    
+def run_mmseqs_clust(seq_df, min_id, method, tmp_dir, ncpus):
     
     if method == 'setcover':
         method_index = '0'
     elif method == 'conncomp':
         method_index = '1'
     else:
-        raise ValueError('Invalid recursive splitting method.')
+        raise ValueError('Invalid mmseqs clustering method.')
+    
+    #write fasta file
+    with open(f'{tmp_dir}/mmseqs_in.fasta','w') as f:
+        for i,row in seq_df.iterrows():
+            f.write(f">{row['sequence_id']}\n{row['VHH']}\n") #Index here is the intermediate_id
+            
+    #run mmseqs clustering
+    result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs', 'easy-cluster',
+                            f'{tmp_dir}/mmseqs_in.fasta', f'{tmp_dir}/mmseqs_out', f'{tmp_dir}/tmp',
+                             '-s', '7.5', #sensitivity set to max
+                             '-c', str(max(0,(min_id - 0.2))), #set this lower than seq-id cutoff so it doesn't have an impact
+                             '--min-seq-id', str(min_id), #only cluster seqs more similar than user input
+                             '-e', 'inf', #max e-value to be clustered (set to keep all)
+                             '-v', '1', #verbosity
+                             '--cluster-steps', '3', #use faster cascaded clustering method
+                             '--seq-id-mode', '0', #use alignment length to normalize
+                             '--cluster-mode', method_index, #use user-specified method
+                             '--alignment-mode', '3', #get percent identity, rather than alignment score
+                             '--max-seqs', '1000', #get top 1000 matches to each query
+                             '--gap-open', '20', #set high gap-opening penalty to prevent excessive gaps
+                             '--gap-extend', '3',#set high gap-extend penalty to prevent excessive gaps
+                             '--similarity-type', '2', #use sequence identity, not score
+                             '--threads', str(ncpus)]) #how many cpus to use
+    assert result.returncode == 0
+    
+    #read in clusters
+    mmseqs_clusters = pd.read_csv(f'{tmp_dir}/mmseqs_out_cluster.tsv',names=['mmseqs_id','sequence_id'],sep='\t')
+    
+    #remove old clusters and add new ones
+    seq_df = seq_df.drop(columns=['mmseqs_id'],errors='ignore')
+    seq_df = seq_df.merge(mmseqs_clusters,on='sequence_id',how='left')
+    
+    #clean up
+    for f in glob(f'{tmp_dir}/*'):
+        subprocess.run(['rm', '-r', f])
+        
+    return seq_df
+
+def recursive_mmseqs_split(group, max_group_size, min_id, id_step, method, tmp_dir, ncpus):
     
     group_index = group.index.copy()
     
@@ -775,41 +814,10 @@ def recursive_mmseqs_split(group, max_group_size, min_id, id_step, method, tmp_d
     #otherwise split into groups recursively with mmseqs
     else:
         print(len(group),min_id,flush=True)
-        #write fasta file
-        with open(f'{tmp_dir}/mmseqs_in.fasta','w') as f:
-            for i,row in group.iterrows():
-                f.write(f">{row['sequence_id']}\n{row['VHH']}\n") #Index here is the intermediate_id
-                
-        #run mmseqs clustering
-        result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs', 'easy-cluster',
-                                f'{tmp_dir}/mmseqs_in.fasta', f'{tmp_dir}/mmseqs_out', f'{tmp_dir}/tmp',
-                                 '-s', '7.5', #sensitivity set to max
-                                 '-c', str(max(0,(min_id - 0.2))), #set this lower than seq-id cutoff so it doesn't have an impact
-                                 '--min-seq-id', str(min_id), #only cluster seqs more similar than user input
-                                 '-e', 'inf', #max e-value to be clustered (set to keep all)
-                                 '-v', '1', #verbosity
-                                 '--cluster-steps', '3', #use faster cascaded clustering method
-                                 '--seq-id-mode', '0', #use alignment length to normalize
-                                 '--cluster-mode', method_index, #use user-specified method
-                                 '--alignment-mode', '3', #get percent identity, rather than alignment score
-                                 '--max-seqs', '1000', #get top 1000 matches to each query
-                                 '--gap-open', '20', #set high gap-opening penalty to prevent excessive gaps
-                                 '--gap-extend', '3',#set high gap-extend penalty to prevent excessive gaps
-                                 '--similarity-type', '2', #use sequence identity, not score
-                                 '--threads', str(ncpus)]) #how many cpus to use
-        assert result.returncode == 0
         
-        #read in clusters
-        mmseqs_clusters = pd.read_csv(f'{tmp_dir}/mmseqs_out_cluster.tsv',names=['mmseqs_id','sequence_id'],sep='\t')
-        
-        #remove old clusters and add new ones
-        group = group.drop(columns=['mmseqs_id'],errors='ignore')
-        group = group.merge(mmseqs_clusters,on='sequence_id',how='left')
+        #run mmseqs2
+        group = run_mmseqs_clust(group, min_id, method, tmp_dir, ncpus)
         group.index = group_index #this preserves the original index
-        
-        #clean up
-        for f in glob(f'{tmp_dir}/*'):
-            subprocess.run(['rm', '-r', f])
 
         subgroups = []
         max_min_id = 0

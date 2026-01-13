@@ -36,6 +36,7 @@ parser.add_argument('--min_start_match',type=int,default=5,help='Minimum number 
 parser.add_argument('--min_end_match',type=int,default=5,help='Minimum number of amino acids matching end_seq to be considered a real sequence.')
 parser.add_argument('--max_start_scan',type=int,default=40,help='Number of N-term amino acid positions to scan when looking for start_seq.')
 parser.add_argument('--max_end_scan',type=int,default=40,help='Number of C-term amino acid positions to scan when looking for end_seq.')
+parser.add_argument('--min_count',type=int,default=2,help='The minimum number of counts for an amino acid sequence for it to be retained for clustering')
 
 #clustering args
 parser.add_argument('--max_subgroup_size',type=int,default=25000,help='Maximum number of VHHs in a SCOPer (sub)group before triggering a recursive loose mmseqs sub-clustering.')
@@ -82,7 +83,7 @@ def collect_seqs(files):
     print(f'{len(data)} rows in global set after loading tsvs.', flush=True)
     return data
 
-def annotate_and_filter_seqs(args, data, pool, ncpus, agg_funcs):
+def annotate_and_filter_seqs(args, data, min_count, pool, ncpus, agg_funcs):
     # Aggregate duplicate DNA sequences
     data = data.groupby('sequence', sort=False).aggregate(func=agg_funcs).reset_index(drop=True)
     print(f'{len(data)} unique DNA sequences.', flush=True)
@@ -124,8 +125,8 @@ def annotate_and_filter_seqs(args, data, pool, ncpus, agg_funcs):
     data = data.merge(vhh_counts, on='VHH')
 
     # Drop singleton VHHs
-    data = data[data['VHH_duplicate_count'] > 1]
-    print(f'{len(data)} sequences, encoding {data["VHH"].nunique()} unique VHHs after removing singletons.', flush=True)
+    data = data[data['VHH_duplicate_count'] >= min_count]
+    print(f'{len(data)} sequences, encoding {data["VHH"].nunique()} unique VHHs after removing rare amino acid sequences (<{min_count}).', flush=True)
 
     # Reset index and assign sequence IDs
     data = data.reset_index(drop=True)
@@ -451,7 +452,7 @@ if __name__ == '__main__':
         else:
             agg_funcs[c] = np.sum
     
-    data,vhh = annotate_and_filter_seqs(args,data,pool,ncpus,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
+    data,vhh = annotate_and_filter_seqs(args,data,args.min_count,pool,ncpus,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
     vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
     
     #remove unnecessary column to save space

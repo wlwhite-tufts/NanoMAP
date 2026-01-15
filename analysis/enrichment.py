@@ -19,10 +19,10 @@ def get_args():
     parser = argparse.ArgumentParser(prog='Final Tabulation',
                                      description='Collect enrichment and other info for clustered sequences.')
     #main args
-    parser.add_argument('--GS_file',type=str,help='The file that has the family and annotation information for all sequences in the experiment.')
-    parser.add_argument('--suffix',type=str,default='',help='Additional suffix for output csv files.')
+    parser.add_argument('--in_file',type=str,help='The file that has the family and annotation information for all sequences in the experiment.')
     parser.add_argument('--sample_file',type=str,help='The csv file containig the names and file paths for all samples to be analyzed.')
     parser.add_argument('--pair_file',type=str,help='The csv file denoting which gorups of samples should be compared to each other for enrichment analysis.')
+    parser.add_argument('--suffix',type=str,default='',help='Additional suffix for output csv files.')
     parser.add_argument('--seq_col',type=str,default='VHH',help='The column name to use for identifying unique sequences.')
     parser.add_argument('--fam_col',type=str,default='meta_clone_id_single_0.25',help='The column name to use for identifying families of sequences.')
     parser.add_argument('--gfold_quant',type=float,default=[0.01],nargs='*',help='The folder to store the preseq analysis results in if requested.')
@@ -31,7 +31,7 @@ def get_args():
     return parser.parse_args()
 
 if __name__ == '__main__':
-    GS_file = args.GS_file #input global set file
+    GS_file = args.in_file #input global set file
     samples = args.sample_file #file describing which samples to load and what names to give them
     pairs = args.pair_file #file describing which samples to use for enrichment analysis
     

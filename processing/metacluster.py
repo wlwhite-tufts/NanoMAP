@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import sys
 import os
+import shutil
 import subprocess
 from sklearn.cluster import AgglomerativeClustering
 from multiprocessing import Pool
@@ -16,63 +17,83 @@ from Levenshtein import distance
 from functools import partial
 from itertools import repeat
 
-sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src/utils/')
-from python_utils import *
-sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/src')
-from analysis.sequence_silhouette_score_faster import weighted_ANARCI_silhouette
+#get main dir for repo
+repo_path = os.path.dirname(os.path.abspath(__file__))
+repo_path = '/'.join(repo_path.split('/')[:-1])
+sys.path.append(repo_path)
+from utils import *
+from analysis.fast_silhouette_score import weighted_ANARCI_silhouette_fast
 
-#get user inputs
-parser = argparse.ArgumentParser(prog='Cluster Based on ANARCI alignment',
-                                 description='Collect sequences from input folder and cluster them using an agglomerative clustering method.')
-#I/O args
-parser.add_argument('--in_dir',type=str,help='The directory that contains the assembled sequences. Looks for *db-pass.tsv, or */*db-pass.tsv')
-parser.add_argument('--out_file',type=str,help='Name for the output file (can include file path).')
-parser.add_argument('--keep_intermediates',action='store_true',help='Set this flag to save the cluster IDs for each clustering leading to the metaclustering.')
-
-#translation args
-parser.add_argument('--start_seq',type=str,default='LVQPGGSLRLSC',help='Amino acid sequence to scan for when finding starting point of translation.')
-parser.add_argument('--end_seq',type=str,default='WGQGTQVTVSS',help='Amino acid sequence to scan for when finding ending point of translation.')
-parser.add_argument('--min_start_match',type=int,default=5,help='Minimum number of amino acids matching start_seq to be considered a real sequence.')
-parser.add_argument('--min_end_match',type=int,default=5,help='Minimum number of amino acids matching end_seq to be considered a real sequence.')
-parser.add_argument('--max_start_scan',type=int,default=40,help='Number of N-term amino acid positions to scan when looking for start_seq.')
-parser.add_argument('--max_end_scan',type=int,default=40,help='Number of C-term amino acid positions to scan when looking for end_seq.')
-parser.add_argument('--min_count',type=int,default=2,help='The minimum number of counts for an amino acid sequence for it to be retained for clustering')
-
-#clustering args
-parser.add_argument('--max_subgroup_size',type=int,default=25000,help='Maximum number of VHHs in a SCOPer (sub)group before triggering a recursive loose mmseqs sub-clustering.')
-parser.add_argument('--recursive_min_id_start',type=float,nargs=2,default=[0.5,0.8],help='Inclusive bounds for range of starting values for minimum sequence identity allowed for recursive loose mmseqs clustering.')
-parser.add_argument('--recursive_min_id_start_N',type=int,default=5,help='Number of values to test between the recursive_min_id_start bounds.')
-parser.add_argument('--recursive_min_id_step',type=float,default=0.035,help='Step size value for minimum sequence identity incerment in each recursive layer.')
-
-parser.add_argument('--recursive_method',type=str,nargs='*',default=['setcover'],help='Method to use for clustering in the recursive mmseqs clustering (setcover or conncomp).')
-
-parser.add_argument('--CDR3_weight',type=float,nargs=2,default=[3,3], help='Inclusive bounds for the weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
-parser.add_argument('--CDR3_weight_N',type=int,default=1,help='Number of values to test between the CDR3_weight bounds.')
-
-parser.add_argument('--max_len_diff',type=int,nargs=2,default=[3,3], help='Inclusive bounds for the range of values of maximum allowed difference in CDR length.')
-parser.add_argument('--max_len_diff_N',type=int,default=1,help='Number of values to test between the max_len_diff bounds.')
-
-parser.add_argument('--linkage',type=str,default=['single','average','complete'],nargs='+',help='The linkage methods to try in weighted hierarchical clustering step (can be single, complete, or average).')
-
-parser.add_argument('--weighted_min_id',type=float,nargs=2,default=[0.4,0.8],help='Inclusinve bounds for the range of distance cutoff values to use in the weighted hierarchical clustering step.')
-parser.add_argument('--weighted_min_id_N',type=int,default=5,help='Number of values to test between the weighted_min_id bounds.')
-
-parser.add_argument('--final_merge_method',type=str,default=['complete'],nargs='+',help='The linkage method(s) to use in the final CDR-based merge.')
-
-parser.add_argument('--final_min_id',type=float,nargs=2,default=[0.75,0.95],help='Inclusinve bounds for the range of distance cutoff values to use in the final merge step.')
-parser.add_argument('--final_min_id_N',type=int,default=3,help='Number of values to test between the final_min_id bounds.')
-
-parser.add_argument('--dist_batch_size',type=int,default=1000,help='When calculating all pairwise distances between sequences in a set, break the calculation into sets of dist_batch_size (so that dist_batch_size**2 distances are calculated per batch).')
-
-#scoring args
-parser.add_argument('--score_fraction',type=float,default=0.5,help='Keep the top score_fraction of individual clusterings. Only these clusterings are used in metaclustering.')
-parser.add_argument('--sample_N_pairs',type=int,default=10000,help='When calculating intra-family distances, calcualte weighted distances for a random sampling of sample_N_pairs pairs of sequences within the cluster.')
-
-#metaclusterign args
-parser.add_argument('--meta_min_id',type=float,default=[0.25],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')
-parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
+def get_args():
+    #get user inputs
+    parser = argparse.ArgumentParser(prog='Cluster Based on ANARCI alignment',
+                                     description='Collect sequences from input folder and cluster them using an agglomerative clustering method.')
+    #I/O args
+    parser.add_argument('--in_dir',type=str,help='The directory that contains the assembled sequences. Looks for *db-pass.tsv, or */*db-pass.tsv')
+    parser.add_argument('--out_file',type=str,help='Name for the output file (can include file path).')
+    parser.add_argument('--keep_intermediates',action='store_true',help='Set this flag to save the cluster IDs for each clustering leading to the metaclustering.')
+    
+    #translation args
+    parser.add_argument('--start_seq',type=str,default='LVQPGGSLRLSC',help='Amino acid sequence to scan for when finding starting point of translation.')
+    parser.add_argument('--end_seq',type=str,default='WGQGTQVTVSS',help='Amino acid sequence to scan for when finding ending point of translation.')
+    parser.add_argument('--min_start_match',type=int,default=5,help='Minimum number of amino acids matching start_seq to be considered a real sequence.')
+    parser.add_argument('--min_end_match',type=int,default=5,help='Minimum number of amino acids matching end_seq to be considered a real sequence.')
+    parser.add_argument('--max_start_scan',type=int,default=40,help='Number of N-term amino acid positions to scan when looking for start_seq.')
+    parser.add_argument('--max_end_scan',type=int,default=40,help='Number of C-term amino acid positions to scan when looking for end_seq.')
+    parser.add_argument('--min_count',type=int,default=2,help='The minimum number of counts for an amino acid sequence for it to be retained for clustering')
+    
+    #clustering args
+    parser.add_argument('--max_subgroup_size',type=int,default=25000,help='Maximum number of VHHs in a SCOPer (sub)group before triggering a recursive loose mmseqs sub-clustering.')
+    parser.add_argument('--recursive_min_id_start',type=float,nargs=2,default=[0.5,0.8],help='Inclusive bounds for range of starting values for minimum sequence identity allowed for recursive loose mmseqs clustering.')
+    parser.add_argument('--recursive_min_id_start_N',type=int,default=5,help='Number of values to test between the recursive_min_id_start bounds.')
+    parser.add_argument('--recursive_min_id_step',type=float,default=0.035,help='Step size value for minimum sequence identity incerment in each recursive layer.')
+    
+    parser.add_argument('--recursive_method',type=str,nargs='*',default=['setcover'],help='Method to use for clustering in the recursive mmseqs clustering (setcover or conncomp).')
+    
+    parser.add_argument('--CDR3_weight',type=float,nargs=2,default=[3,3], help='Inclusive bounds for the weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
+    parser.add_argument('--CDR3_weight_N',type=int,default=1,help='Number of values to test between the CDR3_weight bounds.')
+    
+    parser.add_argument('--max_len_diff',type=int,nargs=2,default=[3,3], help='Inclusive bounds for the range of values of maximum allowed difference in CDR length.')
+    parser.add_argument('--max_len_diff_N',type=int,default=1,help='Number of values to test between the max_len_diff bounds.')
+    
+    parser.add_argument('--linkage',type=str,default=['single','average','complete'],nargs='+',help='The linkage methods to try in weighted hierarchical clustering step (can be single, complete, or average).')
+    
+    parser.add_argument('--weighted_min_id',type=float,nargs=2,default=[0.4,0.8],help='Inclusinve bounds for the range of distance cutoff values to use in the weighted hierarchical clustering step.')
+    parser.add_argument('--weighted_min_id_N',type=int,default=5,help='Number of values to test between the weighted_min_id bounds.')
+    
+    parser.add_argument('--final_merge_method',type=str,default=['complete'],nargs='+',help='The linkage method(s) to use in the final CDR-based merge.')
+    
+    parser.add_argument('--final_min_id',type=float,nargs=2,default=[0.75,0.95],help='Inclusinve bounds for the range of distance cutoff values to use in the final merge step.')
+    parser.add_argument('--final_min_id_N',type=int,default=3,help='Number of values to test between the final_min_id bounds.')
+    
+    parser.add_argument('--dist_batch_size',type=int,default=1000,help='When calculating all pairwise distances between sequences in a set, break the calculation into sets of dist_batch_size (so that dist_batch_size**2 distances are calculated per batch).')
+    
+    #scoring args
+    parser.add_argument('--score_fraction',type=float,default=0.5,help='Keep the top score_fraction of individual clusterings. Only these clusterings are used in metaclustering.')
+    parser.add_argument('--sample_N_pairs',type=int,default=10000,help='When calculating intra-family distances, calcualte weighted distances for a random sampling of sample_N_pairs pairs of sequences within the cluster.')
+    
+    #metaclusterign args
+    parser.add_argument('--meta_min_id',type=float,default=[0.25],nargs='*',help='Minimum fraction of agreeing clusterings to group two VHHs. If given multiple values will try all. Clustering distance threshhold = 1 - meta_min_id')
+    parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
+    
+    return parser.parse_args()
 
 def collect_seqs(files):
+    '''
+    Concatenate data from all tsv files in the provided list.
+    No deduplication is performed.
+    
+    Parameters
+    ----------
+    files: list
+        the list of file names to concatenate
+        these should be the *_db-pass.tsv files generated by assemble_and_filter_reads.py
+        
+    Returns
+    -------
+    data: DataFrame
+        pandas DataFrame with all requested files concatenated.
+    '''
         
     print('Reading the following files:')
     print('\n'.join([f.split('/')[-1] for f in files]))
@@ -83,7 +104,65 @@ def collect_seqs(files):
     print(f'{len(data)} rows in global set after loading tsvs.', flush=True)
     return data
 
-def annotate_and_filter_seqs(args, data, min_count, pool, ncpus, agg_funcs):
+def annotate_and_filter_seqs(args, data, pool, ncpus, agg_funcs):
+    '''
+    Take an input DataFrame, remove bad sequeces from it, and use ANARCI to determine CDR sequences.
+    Removes the following types of sequences:
+        Sequences with internal stop codons
+        Sequences with N or C termini that do not resemble VHHs
+        Rare sequences
+    Adds the following info columns for each sequence
+        sequence_id: a unique string identifying each sequence
+        VHH: the translated sequence
+        start_match: the number of amino acids at the beginning of the translation that match args.start_seq
+        end_match: the number of amino acids at the end of the translation that match args.end_seq
+        start_i: the position in the DNA sequence where the translation started
+        end_i: the position in the DNA sequence where the translation ended
+        start_f: which frame the rtanslation starts in
+        CDR1: the CDR1 amino acid sequence
+        CDR2: the CDR2 amino acid sequence
+        CDR3: the CDR3 amino acid sequence
+        anarci_parse: a tuple of numpy arrays with annotations from ANARCI
+            anarci_parse[0] is a character array with the amino acid sequence
+            anarci_parse[1] is an integer array such that anarci_parse[1][i] is th IMGT position of anarci_parse[0][i]
+        ANARCI_success: bool indicating if the ANARCI parsing was successful
+    
+    Parameters
+    ----------
+    args: parsed arguments
+        The arguments passed as input into the main script - used for start and end point determination and filtering
+        Must contain the following fields:
+            start_seq: the amino acid sequence expected at the N-term of all VHHs
+            end_seq: the amino acid sequence expected at the C-term of all VHHs
+            max_start_scan: the maximal number of bases to scan into the 5' end of the DNA sequence when looking for a translation match to start_seq
+            max_end_scan: the maximal number of bases to scan into the 3' end of the DNA sequence when looking for a translation match to end_seq
+            min_start_match: the minimum number of amino acids matching start_seq for the translation to be considered successful
+            min_end_match: the minimum number of amino acids matching end_seq for the translation to be considered successful
+            min_count: the minimum number of read counts associated with an amino acid sequence for it to be retained in the dataset
+    
+    data: DataFramw
+        pandas DataFrame containing the sequences to be annotated and filtered
+        Must have the following columns:
+            sequence: the DNA sequence of the VHH
+            duplicate_count: the number of read counts associated with each DNA sequence
+            
+    pool: Pool
+        a parallel pool object to use for parallel processing of translation and ANARCI annotation
+        
+    ncpus: int
+        the number of cpus that pool has access to
+        
+    agg_funcs: dict
+        dictionary mapping columns in data to functions that will be used to aggregate the data in those columns when aggregating by amino acid sequence
+        
+    Returns
+    -------
+    data: DataFrame
+        The modified version of data including new annotation columns, and with the bad sequences filtered out
+        
+    vhh: DataFrame
+        The same information as in data, but aggregated by amino acid sequence instead of DNA sequence
+    '''
     # Aggregate duplicate DNA sequences
     data = data.groupby('sequence', sort=False).aggregate(func=agg_funcs).reset_index(drop=True)
     print(f'{len(data)} unique DNA sequences.', flush=True)
@@ -125,8 +204,8 @@ def annotate_and_filter_seqs(args, data, min_count, pool, ncpus, agg_funcs):
     data = data.merge(vhh_counts, on='VHH')
 
     # Drop singleton VHHs
-    data = data[data['VHH_duplicate_count'] >= min_count]
-    print(f'{len(data)} sequences, encoding {data["VHH"].nunique()} unique VHHs after removing rare amino acid sequences (<{min_count}).', flush=True)
+    data = data[data['VHH_duplicate_count'] >= args.min_count]
+    print(f'{len(data)} sequences, encoding {data["VHH"].nunique()} unique VHHs after removing rare amino acid sequences (<{args.min_count}).', flush=True)
 
     # Reset index and assign sequence IDs
     data = data.reset_index(drop=True)
@@ -147,7 +226,74 @@ def annotate_and_filter_seqs(args, data, min_count, pool, ncpus, agg_funcs):
 
     return data, vhh
 
-def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
+def metacluster(args,vhh,out_dir,out_fname,pool,ncpus):
+    '''
+    Main function for calculating the meta-clustering for a given dataset.
+    Returns a modified version of the input DataFrame with column(s) for containing cluster labels for the requested clustering(s).
+    Initial clusterings will be provided in columns with names starting with clone_id_
+    Meta-clustering will be provided in columns with names starting with meta_clone_id_
+    
+    Parameters
+    ----------
+    args: parsed arguments
+        The arguments passed as input into the main script - used for start and end point determination and filtering
+        Must contain the following fields:
+            recursive_method: clustering method for mmseqs to use in recursive splitting step (setcover or conncomp)
+            recursive_min_id_start: list containing start and end values defining the range of values to use as a starting point for recursive splitting
+            recursive_min_id_start_N: the number of values within the range defined by recursive_min_id_start to use 
+            recursive_min_id_step: the increment to increase the recursive_min_id by in each recursive layer
+            max_subgroup_size: the maximum number of sequences in a subgroup produced by the recursove clustering step
+            CDR3_weight: list containing start and end values defining the range of values to use as the weight of CDR3 mismatches relative to CDR1 and 2
+            CDR3_weight_N: the number of values within the range defined by CDR3_weight to use
+            max_len_diff: list containing start and end values defining the range of values to use as the maximum allowed difference in CDR lenghts (applied to each CDR separately)
+            max_len_diff_N: the number of values within the range defined by max_len_diff to use
+            linkage: list of the clustering methods to use during the fine-grained clustering step
+            weighted_min_id: list containing start and end values defining the range of values to use as the minimum identity required for co-clustering
+            weighted_min_id_N: the number of values within the range defined by weighted_min_id to use
+            final_merge_method: list of the clustering methods to use during the merging step
+            final_min_id: list containing start and end values defining the range of values to use as the minimum identity for cluster merging
+            final_min_id_N: the number of values within the range defined by final_min_id to use
+            dist_batch_size: the maximum number of sequences to include in each side of pairwise distance batches (dist_batch_size**2 distances are calculated in each batch)
+            score_fraction: the fraction of initial clusterings to keep for meta-clustering (those with the highest fast silhouette scores are kept)
+            sample_N_pairs: number of pairs to sample between and within clusters when calculating the fast silhouette score
+            meta_min_id: list containing all values to use as minmum fraction of matching labels for meta-clustering
+            meta_method: list of clustering methods to use in for meta-clustering
+            keep_intermediates: boolean flag indicating if the initial clustering columns should be retained in the output
+    
+    vhh: DataFrame
+        pandas DataFrame with the sequences to be clustered
+        Must contain the following columns:
+            VHH: the amino acid sequence of the VHH
+            sequence_id: a unique idntifier for the VHH
+            VHH_duplicate_count: the number of read counts assocaited with the VHH amino acid sequence
+            CDR1: the CDR1 amino acid sequence
+            CDR2: the CDR2 amino acid sequence
+            CDR3: the CDR3 amino acid sequence
+            
+    out_dir: str
+        the file path to the directory where temporary files will be written
+        
+    out_name: str
+        the name of the desired output file
+        used for naming temporary files to avoid conflict with other temporary files being written at the same time
+        
+    pool: Pool
+        a parallel pool object to use for parallel processing of translation and ANARCI annotation
+        
+    ncpus: int
+        the number of cpus that pool has access to
+        
+    Returns
+    -------
+    vhh: DataFrame
+        modified version of the input DataFrame with clustering info added
+        
+    id_cols: list
+        list of the column names that contain initial clustering labels
+        
+    meta_id_cols: list
+        list of the column names that contain meta-clustering labels
+    '''
     #############
     ## get parameter combos
     #############
@@ -172,6 +318,10 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     #############
     
     tmp_dir = f'{out_dir}tmp_{out_fname.replace(".csv","")}'
+    if os.path.exists(tmp_dir):
+        #remove stuff from previous run if it exists
+        shutil.rmtree(tmp_dir)
+    #make the folder fresh
     os.mkdir(tmp_dir)
     
     print(f'Getting SCOPer groups.', flush=True)
@@ -371,7 +521,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     if args.score_fraction < 1:
         
         dist_param_map = {col:tuple(cdr3_dist_combos[int(col.split('_')[3])]) for col in id_cols}
-        score_df = weighted_ANARCI_silhouette(vhh, id_cols, dist_param_map, args.sample_N_pairs, pool, ncpus)
+        score_df = weighted_ANARCI_silhouette_fast(vhh, id_cols, dist_param_map, args.sample_N_pairs, pool, ncpus)
 
         score_df = pd.DataFrame(score_df,columns=['name','score']).sort_values(by='score',ascending=False)
         score_df = score_df.head(int(len(score_df)*args.score_fraction))
@@ -420,7 +570,7 @@ def meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus):
     return vhh,id_cols,meta_id_cols
 
 if __name__ == '__main__':
-    args = parser.parse_args()
+    args = get_args()
     
     #set up for parallelization
     ncpus = int(os.environ['SLURM_JOB_CPUS_PER_NODE'])
@@ -452,8 +602,8 @@ if __name__ == '__main__':
         else:
             agg_funcs[c] = np.sum
     
-    data,vhh = annotate_and_filter_seqs(args,data,args.min_count,pool,ncpus,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
-    vhh,id_cols,meta_id_cols = meta_ANARCI_clustering_CDR_merge(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
+    data,vhh = annotate_and_filter_seqs(args,data,pool,ncpus,agg_funcs) #get translations, CDR anotations, and filter out bad/singleton sequences
+    vhh,id_cols,meta_id_cols = metacluster(args,vhh,out_dir,out_fname,pool,ncpus) #get cluster labels
     
     #remove unnecessary column to save space
     del vhh['anarci_parse']

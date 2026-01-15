@@ -1,220 +1,43 @@
-# a variety of utility functions imported by many of the scripts in this folder
+# a variety of utility functions imported by many of the scripts in this repo
 
 from Bio.Seq import Seq
-import re
 import numpy as np
-import subprocess
-from multiprocessing import Pool
-from copy import deepcopy
-from tqdm import tqdm
 import os
 import pandas as pd
 from Levenshtein import distance
-import random
 from anarci import anarci
 import subprocess
 from glob import glob
-from scipy.spatial.distance import cdist, pdist, squareform
-from scipy.cluster.hierarchy import linkage
-from sklearn.cluster import SpectralClustering, AgglomerativeClustering
+from sklearn.cluster import AgglomerativeClustering
 from functools import partial
+import sys
 
-# Snip bp from the end if it doesn't "fit"
-def translate_VHH(dna_data):
-    clean_dna = re.sub("^ACTG", "", dna_data)
-    # Check that length is appropriate
-    clean_dna = clean_dna[:len(clean_dna) - (len(clean_dna)%3)]
-    return str(Seq(clean_dna).translate())[10:] #trim off first 10aa because they're not relevant
-  
-def CDR3_dist(s1,s2):
-    #dist = 1 if s1 and s2 should not be grouped
-    #dist = 0 if they should be grouped
-    
-    if len(s1) != len(s2):
-        return 1
-    
-    #require perfect match for small CDR3s
-    if len(s1) <= 6:
-        return s1 != s2
-    
-    #require >80% match for medium length CDR3s
-    if (len(s1) > 6) and (len(s1) < 10):
-        return np.mean(np.array(list(s1)) == np.array(list(s2))) <= 0.8
-        
-    #require >60% match for long CDR3s
-    if len(s1) >= 10:
-        return np.mean(np.array(list(s1)) == np.array(list(s2))) <= 0.6
-        
-def CDR3_comp(s1,s2):
-    #dist = %difference
-
-    if len(s1) != len(s2):
-        return np.inf
-        
-    dist = np.mean(np.array(list(s1)) != np.array(list(s2)))
-    
-    #require perfect match for small CDR3s
-    if len(s1) <= 6:
-        if dist == 0:
-            return dist
-        return np.inf
-    
-    #require >80% match for medium length CDR3s
-    if (len(s1) > 6) and (len(s1) < 10):
-        if dist < 0.2:
-            return dist
-        return np.inf
-        
-    #require >60% match for long CDR3s
-    if len(s1) >= 10:
-        if dist < 0.4:
-            return dist
-        return np.inf
-        
-def CDR3_nmut(s1,s2):
-    #assumes length of s1 and s2 are the same
-    
-    dist = np.mean(np.array(list(s1)) != np.array(list(s2)))
-    
-    #allow 80% homology  or better, always allowing at least one AA substitution
-    allowed = max(1, np.floor(0.2*len(s1)))
-    
-    if dist <= allowed:
-        return dist
-    else:
-        return np.inf
-    
-def CDR3_comp_similarAA(s1,s2):
-
-    allowed = {
-        #aromatic
-        'Y':{'F','W'},
-        'F':{'Y','W'},
-        'W':{'Y','F'},
-        
-        #small (include CYS b/c disulfide unlikely in CDR)
-        'A':{'S','T','C','G'},
-        'S':{'A','T','C','G'},
-        'T':{'S','A','C','G'},
-        'C':{'A','T','S','G'},
-        'G':{'A','T','S','C'},
-        
-        #polar/negative
-        'D':{'E','Q','N'},
-        'E':{'D','Q','N'},
-        'Q':{'E','D','N'},
-        'N':{'E','Q','D'},
-        
-        #positive
-        'K':{'R'},
-        'R':{'K'},
-        
-        #hydrophobic
-        'I':{'M','L','V'},
-        'M':{'I','L','V'},
-        'L':{'M','I','V'},
-        'V':{'M','L','I'},
-        
-        #weird
-        'H':set(),
-        'P':set()
-        
-    }
-
-    if len(s1) != len(s2):
-        return np.inf
-        
-    dist = np.mean(np.array(list(s1)) != np.array(list(s2)))
-    
-    #require slightly imperfect match for small CDR3s
-    if len(s1) <= 6:
-        if dist == 0: #if there is a perfect match, dist is 0
-            return dist
-        else: #if not perfect, allow 2 AA substitutions if it's to a similar AA
-            tot = 0
-            for i in range(len(s1)):
-                
-                #ignore perfect matches
-                if s1[i]==s2[i]:
-                    continue
-                #count number of allowed substitutions
-                elif s1[i] in allowed[s2[i]]:
-                    tot += 1
-                #infinite dist if any non-allowed substitutions
-                else:
-                    return np.inf
-            #allow 2 subs if each is allowed
-            if tot <= 2:
-                return tot
-        return np.inf
-    
-    #require >80% match for medium length CDR3s
-    if (len(s1) > 6) and (len(s1) < 10):
-        if dist < 0.2:
-            return dist
-        return np.inf
-        
-    #require >60% match for long CDR3s
-    if len(s1) >= 10:
-        if dist < 0.4:
-            return dist
-        return np.inf
-        
-def frac_mismatch(s1,s2):
-    #assumes s1 and s2 are the same length
-    return np.mean(np.array(list(s1)) != np.array(list(s2)))
-    
-def avg_CDR3_mismatch(fam1,fam2):
-    #if comparing a family to itself, return 0
-    if len(set(fam1).difference(set(fam2))) == 0:
-        return 0
-        
-    #reduce each family to 1000 random members to speed up calculation
-    if len(fam1) > 1000:
-        fam1 = random.choices(fam1,k=1000)
-    if len(fam2) > 1000:
-        fam2 = random.choices(fam2,k=1000)
-    
-    tot = 0
-    n = 0
-    for seq1 in fam1:
-        for seq2 in fam2:
-            n += 1
-            #if same length, then it's worth comparing
-            if len(seq1) == len(seq2):
-                tot += frac_mismatch(seq1,seq2)
-            #otherwise say that they are 100% different
-            else:
-                tot += 1
-    return tot/n
-        
-def dist_func_converter(func_name):
-    if func_name == 'CDR3_comp_similarAA':
-        return CDR3_comp_similarAA
-    elif func_name == 'CDR3_comp':
-        return CDR3_comp
-    elif func_name == 'CDR3_nmut':
-        return CDR3_nmut
-    elif func_name == 'frac_mismatch':
-        return frac_mismatch
-
-def run_and_clean(cmd):
-    code = subprocess.run(cmd).returncode
-    subprocess.run(['rm', '-r', cmd[-1]])
-    return code
-    
-def CDR3_dist_row(seq,seqs,func):
-    return [func(seq,s1) for s1 in seqs]
-    
-def aggregate_group(group,count_cols):
-    group = group.sort_values(by=['VHH_duplicate_count','duplicate_count'],ascending=False)
-    out = group.head(1)
-    out[count_cols] = group.loc[:,count_cols].sum(axis=0)
-    assert len(out)==1
-    return out
+#get main dir for repo
+repo_path = os.path.dirname(os.path.abspath(__file__))
+repo_path = '/'.join(repo_path.split('/')[:-1])
+sys.path.append(repo_path)
+from data.user_data import gfold_sif, mmseqs_sif
     
 def run_gfold(q,init_file,final_file,out_file):
-    cmd = ['singularity','exec','/cluster/tufts/cowenlab/wwhite06/packages/gfold_1.1.4--gsl1.16_1.sif',
+    '''
+    Run GFold enrichment calculations on the data in the provided files.
+    
+    Parameters
+    ----------
+    q: float
+        the quantile of the estimated LFC distribution to report
+    init_file: str
+        the file path for the data file containing count information to use as the denomenator of the FC
+    final_file: str
+        the file path for the data file containing count information to use as the numerator of the FC
+    out_file: str
+        the desired path for the GFold result to be saved to
+        
+    Returns
+    -------
+    None
+    '''
+    cmd = ['singularity','exec',gfold_sif,
            'gfold','diff',
            '-norm','Count',
            '-s1',init_file,
@@ -226,7 +49,35 @@ def run_gfold(q,init_file,final_file,out_file):
     assert gfold_result.returncode == 0
     
 def aggregate_and_calculate_fc(data,agg_funcs,agg_col,pair_df,gfold_quantiles,pool):
+    '''
+    Calculate enrichment and GFold values for the specified pairs of groups of columns.
     
+    Parameters
+    ----------
+    data: DataFrame
+        pandas DataFrame containing the read count, sequence, and clustering information
+    agg_funcs: dict
+        mapping of columns to functions to aggregate them with when aggregating within clusters
+    agg_col: str
+        name of the column containing cluster label info
+    pair_df: DataFrame
+        pandas DataFrame containing information on which groups of columns to compare
+        must contain the following columns
+            initial: the names of the read count columns to use as the denominator of the FC calculation (with names separated by '+")
+            final: the names of the read count columns to use as the numerator of the FC calculation (with names separated by '+")
+            name: the base name to give the resulting GFold and enrichment columns
+    gfold_quantiles: list
+        list of quantile values use for GFold calculations
+        one column entry in this list will be created for each row in pair_df
+    pool: Pool
+        the parallel pool to use for GFold calculations
+        
+    Returns
+    -------
+    result: DataFrame
+        pandas DataFrame with the same columns as data, plus gfold and enrichment info aggregated over the labels in agg_col
+        each row corresponds to a unique value in agg_col
+    '''
     #aggregate on requested column
     print(f'Aggregating on {agg_col}.',flush=True)
     result = data.groupby(by=agg_col,sort=False).aggregate(agg_funcs)
@@ -304,154 +155,41 @@ def aggregate_and_calculate_fc(data,agg_funcs,agg_col,pair_df,gfold_quantiles,po
             del result[col]
     
     return result
-            
-def run_preseq(data,pair_df,out_dir,suffix):
-    
-    #get all sets of combined samples to run preseq on
-    combos = set(pair_df['initial'].tolist()+pair_df['final'].tolist())
-    
-    for combo in tqdm(combos):
-        
-        columns = combo.split('+')
-        name = '+'.join(set([col.split('_')[-1] for col in columns]))
-        
-        #add columns together and write count file
-        counts = data[columns].sum(axis=1)
-        with open(f'{out_dir}/{name}_{suffix}_counts.txt','w') as f:
-            for c in counts[counts>0]:
-                f.write(f'{c}\n')
-            
-        #run preseq
-        result = subprocess.run(['preseq', 'c_curve',
-                                '-V', f'{out_dir}/{name}_{suffix}_counts.txt',
-                                '-o', f'{out_dir}/{name}_{suffix}_curve.txt',
-                                '-s', '100'])
-        
-        if result.returncode != 0:
-            print(f'{name}_curve preseq failed!')
 
-def run_preseq_assembly(data,sample_df,pair_df,out_dir,kind,pool,
-                        seq_col,fam_col,
-                        start_seq,end_seq,max_start_scan,max_end_scan,min_start_match,min_end_match,
-                        tmp_dir,mmseqs_db,min_seq_id):
-    
-    if kind not in {'vhh','fam'}:
-        raise Exception('Invalid kind in preseq analysis.')
-    
-    #get all sets of combined samples to run preseq on
-    combos = set(pair_df['initial'].tolist()+pair_df['final'].tolist())
-    
-    for combo in tqdm(combos):
-        
-        columns = combo.split('+')
-        
-        #get names of files to load
-        fnames = [sample_df.loc[sample_df['name']==col,'file'].tolist()[0] for col in columns]
-        #merge unfiltered count data onto main data
-        count_info = data[['sequence_id','sequence',seq_col,fam_col]].copy()
-        for file in fnames:
-            new_df = pd.read_csv(file,sep='\t')[['sequence','duplicate_count']]
-            count_info = count_info.merge(new_df,on='sequence',how='outer',suffixes=['',file.split('/')[-1].split('_')[0]])
-        #get total counts across all samples
-        count_cols = [col for col in count_info.columns if 'duplicate_count' in col]
-        count_info['total'] = count_info[count_cols].sum(axis=1)
-        
-        #get translations of sequences without translation
-        missing_locs = count_info[seq_col].map(lambda x: type(x)!=str)
-        print(columns, missing_locs.sum(), len(count_info), flush=True)
-        dna_seqs = count_info.loc[missing_locs,'sequence']
-        aa_df = pd.DataFrame(pool.starmap(translate_VHH_end_scan,
-                                          [(seq, start_seq, end_seq, max_start_scan, max_end_scan) for seq in dna_seqs],
-                                          chunksize=5000),
-                            columns=['sequence',seq_col,'start_match','start_i','start_f','end_match','end_i'])
-        #find and label bad seqs
-        has_stop = aa_df[seq_col].map(lambda x: '*' in x)
-        bad_start = aa_df['start_match'] < min_start_match
-        bad_end = aa_df['end_match'] < min_end_match
-        bad_seq = has_stop|bad_start|bad_end
-        aa_df.loc[bad_seq,seq_col] = ''
-        
-        #fill in missing translations
-        count_info.loc[missing_locs,seq_col] = aa_df[seq_col].values
-        #remove failed translations
-        count_info = count_info.loc[count_info[seq_col]!='',:]
-        
-        #aggregate by vhh
-        agg_funcs = {
-            'sequence_id':lambda x: x.iloc[0],
-            fam_col:lambda x: x.iloc[0],
-            'total':np.sum,
-        }
-        count_info = count_info[['sequence_id',fam_col,seq_col,'total']].groupby(by=seq_col,sort=False).aggregate(agg_funcs)
-        #bring back VHH as a column instead of index
-        count_info = count_info.reset_index()
-        count_info.rename({'index':seq_col})
-        
-        #find families if necessary
-        if kind == 'fam':
-            
-            #need to aldo fill in missing fam info
-            missing_fams = count_info[fam_col].map(lambda x: type(x)!=str)
-            print(missing_fams.sum(),flush=True)
-            
-            #add seq_ids to missing rows
-            count_info.loc[missing_fams,'sequence_id'] = [f'N-{i}' for i in range(missing_fams.sum())]
-            
-            #write mmseqs input fasta
-            with open(f'{tmp_dir}/tmp_mmseqs_query.fasta','w') as f:
-                for i,row in count_info.loc[missing_fams,:].iterrows():
-                    f.write(f'>{row["sequence_id"]}\n{row[seq_col]}\n')
-                    
-            #run mmseqs to find closest family
-            result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
-                                     'easy-search', f'{tmp_dir}/tmp_mmseqs_query.fasta', mmseqs_db, f'{tmp_dir}/mmseqs_results', tmp_dir,
-                                     '-s', '6', #sensitivity
-                                     '--local-tmp', tmp_dir,
-                                     '--format-output', 'query,target,pident',
-                                     '--max-seq-id','1.0', #do not do any redundancy filtering
-                                     '--max-seqs', '100', #look at top 100 seqs per query
-                                     '-v', '0'])
-            assert result.returncode == 0
-                            
-            mmseqs_df = pd.read_csv(f'{tmp_dir}/mmseqs_results',names=['query','target','pident'],sep='\t')
-            fam_idx = 0
-            for seq_id,group in mmseqs_df.groupby('query'):
-                best_idx = group['pident'].idxmax()
-                if group.loc[best_idx,'pident'] >= min_seq_id: #close enough match
-                    match_id = count_info.loc[count_info['sequence_id']==group.loc[best_idx,'target'],fam_col] #get family of best match
-                    assert len(match_id) == 1
-                    count_info.loc[count_info['sequence_id']==seq_id,fam_col] = match_id #set clone_id of the query sequence 
-                else: #not a good match to any family
-                    count_info.loc[count_info['sequence_id']==seq_id,fam_col] = f'N-{fam_idx}' #give new clone_id
-                    fam_idx += 1 #increment new clone_id counter
-                    
-            #aggregate by family
-            count_info = count_info[['clone_id','total']].groupby(by='clone_id',sort=False).aggregate(np.sum)
-            
-            #clean up
-            for item in glob(f'{tmp_dir}/*'):
-                if item != mmseqs_db:
-                    result = subprocess.run(['rm', '-r', item])
-                    assert result.returncode == 0
-        
-        name = '+'.join(set([col.split('_')[-1] for col in columns]))
-        
-        #add columns together and write count file
-        with open(f'{out_dir}/{name}_{kind}_counts.txt','w') as f:
-            for c in count_info['total']:
-                f.write(f'{c}\n')
-            
-        #run preseq
-        result = subprocess.run(['preseq', 'c_curve',
-                                '-V', f'{out_dir}/{name}_{kind}_counts.txt',
-                                '-o', f'{out_dir}/{name}_{kind}_curve.txt',
-                                '-s', '100'])
-        
-        if result.returncode != 0:
-            print(f'{name}_curve preseq failed!')
-            
 def translate_VHH_end_scan(dna,start_aa,end_aa,start_cap,end_cap):
+    '''
+    Find the VHH-encoding region of a DNA sequence and translate it to animo acids.
     
+    Parameters
+    ----------
+    dna: str
+        the DNA sequene to be translated
+    start_aa: str
+        the expected N-terminal amino acid sequence
+    end_aa: str
+        the expected C-terminal amino acid sequence
+    start_cap: int
+        the maximum number of bases to scan into the 5' end of dna when looking for start_aa
+    end_cap: int
+        the maximum number of bases to scan into the 3' end of dna when looking for end_aa
+        
+    Returns
+    -------
+    dna: str
+        the same DNA sequence that was given as input
+    aa: str
+        the translated amino acid sequence that has the closest match to start_aa and end_aa
+    best_match_start: int
+        the number of amino acids that match start_aa in the best translation
+    best_i_start: int
+        the position in the DNA sequence that the translation starts at
+    best_f: int
+        the frame of the best translation
+    best_match_end: int
+        the number of amino acids that match end_aa in the best translation
+    best_i_end: int
+        the position in the DNA sequence that the translation ends at
+    '''
     start_aa = np.array(list(start_aa))
     start_len = len(start_aa)
     
@@ -518,10 +256,37 @@ def translate_VHH_end_scan(dna,start_aa,end_aa,start_cap,end_cap):
     return dna, ''.join(best_aa), best_match_start, best_i_start, best_f, best_match_end, best_i_end
 
 def translate_wrapper(args):
+    '''
+    wrapper for translate_VHH_end_scan to make parallelization easier
+    '''
     return translate_VHH_end_scan(*args)
     
 def get_anarci_alignment(seq):
+    '''
+    Get ANARCI annotations for a VHH sequence.
     
+    Parameters
+    ----------
+    seq: str
+        the animo acid sequence to be annotated
+        
+    Returns
+    -------
+    seq: str
+        the same sequence that was given as input
+    annot: tuple
+        tuple of numpy arrays with complete annotation info
+        annot[0] is a character array with the amino acid sequence
+        annot[1] is an integer array such that annot[1][i] is th IMGT position of annot[0][i]
+    CDR1: str
+        the CDR1 amino acid sequence
+    CDR2: str
+        the CDR2 amino acid sequence
+    CDR3: str
+        the CDR3 amino acid sequence
+    ANARCI_success: bool
+        indicates if the ANARCI parsing was successful
+    '''
     sequences = [('id',seq)]
     numbering, _, _ = anarci(sequences, scheme="imgt", output=False, allowed_species=['alpaca'])
     
@@ -557,7 +322,31 @@ def get_anarci_alignment(seq):
             True)
             
 def weighted_anarci_dist(CDR_list1,CDR_list2,weight_scheme,max_len_diffs):
+    '''
+    Calculates the weighted CDR distance (in the range [0,1]) between a pair of sequences.
+    Each mismatch is weighted according to which CDR it's in.
+    Pairs of sequences with CDRs that are too different in length are assigned a distance of 1.
     
+    Parameters
+    ----------
+    CDR_list1: list
+        list containing the CDR sequences for the first sequence
+        CDR_list1[i] is the CDRi sequence
+    CDR_list2: list
+        list containing the CDR sequences for the second sequence
+        CDR_list2[i] is the CDRi sequence
+    weight_scheme: list
+        list of weights for mismatches in each CDR
+        weight of mismatch for CDRi is weight_scheme[i]
+    max_len_diffs: list
+        list of maximum allowed differene in length for each CDR
+        max different for CDRi is max_len_diffs[i]
+        
+    Returns
+    -------
+    dist: float
+        value in the range [0,1] describing the difference between the pair of sequences
+    '''
     #set dist to 100% if either of the pair had no ANARCI parse
     if (CDR_list1[0] == '*') or (CDR_list2[0] == '*'):
         return 1
@@ -576,46 +365,45 @@ def weighted_anarci_dist(CDR_list1,CDR_list2,weight_scheme,max_len_diffs):
         
     return dist_tot/weight_tot #compute weighted percent identity
     
-def weighted_anarci_dist_with_penalty(CDR_list1,CDR_list2,weight_scheme,max_len_diffs,penalty):
-    
-    #set dist to 100% if either of the pair had no ANARCI parse
-    if (CDR_list1[0] == '*') or (CDR_list2[0] == '*'):
-        return 1
-        
-    #set dist to 100% if any CDR pair is too different in length
-    for i in range(len(CDR_list1)-1,-1,-1): #do this in reverse order because most likely to have CDR3 diff so will return faster
-        if abs(len(CDR_list1[i]) - len(CDR_list2[i])) > max_len_diffs[i]:
-            return 1
-    
-    dist_tot = 0
-    weight_tot = 0
-    for i in range(len(CDR_list1)):
-        dist = distance(CDR_list1[i],CDR_list2[i]) #edit distance between CDR pair
-        dist_tot += dist*weight_scheme[i] #add weighted dist to total
-        weight_tot += np.max([len(CDR_list1[i]),len(CDR_list2[i])])*weight_scheme[i] #add weight to total
-    
-    tot_penalty = 0
-    for i in range(len(CDR_list1)):
-        tot_penalty += penalty*abs(len(CDR_list1[i]) - len(CDR_list2[i]))
-        
-    return min(1, dist_tot/weight_tot + tot_penalty) #compute weighted percent identity
-    
-def ANARCI_dist_row(CDR_list1,CDR_list_list,weight_scheme,max_len_diffs):
-    return [weighted_anarci_dist(CDR_list1,CDR_list2,weight_scheme,max_len_diffs) for CDR_list2 in CDR_list_list]
-
-def ANARCI_dist_pairs(pair_list,weight_scheme,max_len_diffs):
-    return [weighted_anarci_dist(*pair,weight_scheme,max_len_diffs) for pair in pair_list]
-    
-def ANARCI_dist_with_penalty_row(CDR_list1,CDR_list_list,weight_scheme,max_len_diffs,penalty):
-    return [weighted_anarci_dist_with_penalty(CDR_list1,CDR_list2,weight_scheme,max_len_diffs,penalty) for CDR_list2 in CDR_list_list]
-    
-def weighted_anarci_dist_index(idx1,idx2,df,weight_scheme,max_len_diffs):
-    cdr_list1 = df.loc[idx1[0],['CDR1','CDR2','CDR3']].tolist()
-    cdr_list2 = df.loc[idx2[0],['CDR1','CDR2','CDR3']].tolist()
-    return weighted_anarci_dist(cdr_list1,cdr_list2,weight_scheme,max_len_diffs)
-    
 def fill_in_weighted_anarci_dists(dist_df, info_df, dist_col, weight_scheme, max_len_diff, pool, ncpus):
+    '''
+    Given a DataFrame of VHH pairs with some distances calculated and a set of pairs to get distances between,
+    calculate any distances that have not been already and add them ot the distance DataFrame.
     
+    Parameters
+    ----------
+    dist_df: DataFrame
+        the DataFrame that has some pre-calculated distances in it
+        must contain a column name matching the dist_col parameter, as well as the following columns:
+            query: the name of the "query" sequence in the pair
+            target: the name of the "target" sequence in the pair
+    info_df: DataFrame
+        the DataFrame that has pairs of sequences that need distances
+        must be indexed by the values in dist_df['query'] and dist_df['target']
+        must containt the following columns:
+            CDR1: the CDR1 amino acid sequence
+            CDR2: the CDR2 amino acid sequence
+            CDR3: the CDR3 amino acid sequence
+    dist_col: str
+        the column name in dist_df that contains the calculated distances, or NaN if they have not been calculated yet
+    weight_scheme: list
+        list of weights for mismatches in each CDR to use in distance calculations
+        weight of mismatch for CDRi is weight_scheme[i]
+    max_len_diffs: list
+        list of maximum allowed differene in length for each CDR to use in distance calculations
+        max different for CDRi is max_len_diffs[i]
+    pool: Pool
+        a parallel pool object to use for parallel processing of distance calculations
+    ncpus: int
+        the number of cpus that pool has access to
+        
+    Returns
+    -------
+    dist_df: DataFrame
+        the updated version of dist_df with new distances filled in
+    missing_idx: Series
+        pandas Series of bools indicating if the corresponding row in dist_df was filled in
+    '''
     missing_idx = dist_df[dist_col].isna()
     N_fill = missing_idx.sum()
     if N_fill:
@@ -637,6 +425,36 @@ def fill_in_weighted_anarci_dists(dist_df, info_df, dist_col, weight_scheme, max
     return dist_df,missing_idx
     
 def weighted_anarci_dist_all_pairs(CDR_list1, CDR_list2, same, weight_scheme, max_len_diffs):
+    '''
+    Calculate pairwise distances between all pairs of sequences across the two lists provided.
+    
+    Parameters
+    ----------
+    CDR_list1: list
+        list of lists of strs
+        the inner lists each contain the CDR amino acid sequences for a single VHH in set 1
+    CDR_list2: list
+        list of lists of strs
+        the inner lists each contain the CDR amino acid sequences for a single VHH in set 2
+    same: bool
+        indicates if set 1 and set 2 contain the exact same sequences
+        if True, only upper-diagonal pairwise distances are calculated
+    weight_scheme: list
+        list of weights for mismatches in each CDR to use in distance calculations
+        weight of mismatch for CDRi is weight_scheme[i]
+    max_len_diffs: list
+        list of maximum allowed differene in length for each CDR to use in distance calculations
+        max different for CDRi is max_len_diffs[i]
+    pool: Pool
+        a parallel pool object to use for parallel processing of distance calculations
+    
+    Returns
+    -------
+    dists: array
+        numpy array containing the pairwise disances
+        dists[i,j] is the distance between CDR_list1[i] and CDR_list2[j]
+        diagonal and below entries are 0 if same is True
+    '''
     #if given two lists, compare all cross-list pairs
     if not same:
         dists = np.zeros([len(CDR_list1),len(CDR_list2)])*np.nan
@@ -654,6 +472,30 @@ def weighted_anarci_dist_all_pairs(CDR_list1, CDR_list2, same, weight_scheme, ma
     return dists
     
 def batched_pairwise_weighted_anarci_dist(CDR_list, batch_size, weight_scheme, max_len_diffs, pool):
+    '''
+    Split pairwise distance calculations for all pairs within a given set into batches and calculate each batch in parallel.
+    
+    Parameters
+    ----------
+    CDR_list: list
+        list of lists of strs
+        the inner lists each contain the CDR amino acid sequences for a single VHH
+        pairwise distancess between all VHHs in CDR_list will be calculated
+    batch_size: int
+        the number of VHHs to put in each batch (resulting matric will have batch_size**2 distances)
+    weight_scheme: list
+        list of weights for mismatches in each CDR to use in distance calculations
+        weight of mismatch for CDRi is weight_scheme[i]
+    max_len_diffs: list
+        list of maximum allowed differene in length for each CDR to use in distance calculations
+        max different for CDRi is max_len_diffs[i]
+        
+    Returns
+    -------
+    dists: array
+        numpy array containing the pairwise disances
+        dists[i,j] is the distance between CDR_list[i] and CDR_list[j]
+    '''
     N_seqs = len(CDR_list)
     
     N_batches = int(np.ceil(N_seqs/batch_size))
@@ -672,6 +514,27 @@ def batched_pairwise_weighted_anarci_dist(CDR_list, batch_size, weight_scheme, m
     return dists
     
 def get_pairwise_cluster_rep_distances(df,id_cols,n_reps):
+    '''
+    For a given list of cluster label columns, calculate pairwise "rep distances" between the columns.
+    rep_distance is defined as the number of representatives from either clustering that are not representatives in both clusterings.
+    A sequence is a representative in a clustering if it is one of the most abundant sequence in its cluster.
+    
+    Parameters
+    ----------
+    df: DataFrame
+        the DataFrame with the clustering info
+        must contain the columns listed in id_cols and a column named sequence_id that contains a unique label for each sequence
+    id_cols: list
+        list of column names in df that contain cluster labels to be compared
+    n_reps: int
+        how many representatives to take from each cluster
+        the most abundant members are used as representatives
+        
+    Returns
+    -------
+    clust_dists: array
+        numpy array where clust_dists[i,j] is the rep_distance between id_cols[i] and id_cols[j]
+    '''
     df = df.sort_values(by='VHH_duplicate_count',ascending=False)
     
     #cluster the clusterings by top N overlap
@@ -689,7 +552,32 @@ def get_pairwise_cluster_rep_distances(df,id_cols,n_reps):
     return clust_dists
 
 def agg_clust_to_max_extra_reps(df,id_cols,dists,method,n_reps,max_extra_reps):
+    '''
+    Recursively find groups of clusterings that have similar enough sets of representatives that it makes sense to recycle distance calculations between them.
+    For use in silhouette scoring to improve compute time.
     
+    Parameters
+    ----------
+    df: DataFrame
+        the DataFrame with the clustering info
+        must contain the columns listed in id_cols and a column named sequence_id that contains a unique label for each sequence
+    id_cols: list
+        list of column names in df that contain cluster labels to be grouped
+    dists: array
+        numpy array where clust_dists[i,j] is the rep_distance between id_cols[i] and id_cols[j]
+    method: str
+        name of agglomerative clustering method to use when clustering columns
+    n_reps: int
+        how many representatives to take from each cluster of sequences
+        the most abundant members are used as representatives
+    max_extra_reps: int
+        the maximum number representatives allowed in a cluster after adding in representatives of clusters in other clusterings
+        
+    Returns
+    -------
+    labels: array
+        numpy array where new_labels[i] is the group that id_cols[i] belongs to
+    '''
     #find how many extra reps are necessary with this group of columns
     _, max_reps = get_fam_reps(id_cols,df,n_reps)
     print(f'{len(id_cols)} columns with max_reps={max_reps}',flush=True)
@@ -718,6 +606,27 @@ def agg_clust_to_max_extra_reps(df,id_cols,dists,method,n_reps,max_extra_reps):
         return np.zeros(len(id_cols))
 
 def get_fam_reps(id_cols,df,n_reps):
+    '''
+    Get the set of all representatives for a group of cluster label columns.
+    
+    Parameters
+    ----------
+    id_cols: list
+        list of column names in df that contain cluster labels to be grouped
+    df: DataFrame
+        the DataFrame with the clustering info
+        must contain the columns listed in id_cols and a column named sequence_id that contains a unique label for each sequence
+    n_reps: int
+        how many representatives to take from each cluster of sequences
+        the most abundant members are used as representatives
+        
+    Returns
+    -------
+    all_reps: DataFrame
+        contains the same columns as df, but only the rows corresponding to representatives of the clusterings in id_cols
+    max_reps: int
+        the size of the largest cluster in any clustering in id_cols, after excluding sequences that are not representatives of any columns
+    '''
     #collect set of all possible family representatives
     all_reps = pd.DataFrame()
     for id_col in id_cols:
@@ -733,7 +642,32 @@ def get_fam_reps(id_cols,df,n_reps):
     return all_reps, max_reps
     
 def approx_avg_internal_anarci_dist(df,n_sample,cdr_weights,max_len_diff,pool):
+    '''
+    Approximate the average pairwise distance between VHHs in the given DataFrame.
     
+    df: DataFrame
+        pandas DataFrame containing info about the sequences to be compared
+        must have the following columns:
+            CDR1: the CDR1 amino acid sequence
+            CDR2: the CDR2 amino acid sequence
+            CDR3: the CDR3 amino acid sequence
+    n_sample: int
+        number of pairs to sample when approximating the average
+        if the number of pairs within df is less than n_sample, all pairwise distances are calculated
+    cdr_weights: list
+        list of weights for mismatches in each CDR to use in distance calculations
+        weight of mismatch for CDRi is cdr_weights[i]
+    max_len_diffs: list
+        list of maximum allowed differene in length for each CDR to use in distance calculations
+        max different for CDRi is max_len_diffs[i]
+    pool: Pool
+        a parallel pool object to use for parallel processing of distance calculations
+        
+    Returns
+    -------
+    avg_dist: float
+        the approximated average distance
+    '''
     N = len(df)
     #if there is only one item, it is 0 from itself
     if N == 1:
@@ -758,7 +692,30 @@ def approx_avg_internal_anarci_dist(df,n_sample,cdr_weights,max_len_diff,pool):
     return np.mean(dists)
     
 def run_mmseqs_clust(seq_df, min_id, method, tmp_dir, ncpus):
+    '''
+    Wrapper for running MMseqs2 clustering
     
+    Parameters
+    ----------
+    seq_df: DataFrame
+        pandas DataFrame containing sequence info for the sequences to be clustered
+        must contain the following columns
+            VHH: the amino acid sequence
+            sequence_id: unique identifier for each sequence
+    min_id: float
+        minimum identity (in the range [0,1]) for MMseqs to group sequences together
+    method: str
+        the name of the clustering method for MMseqs to use (setcover or conncomp)
+    tmp_dir: str
+        the directory to put temp files in
+    ncpus: int
+        the number of cores to parallelize MMseqs calculations over
+        
+    Returns
+    -------
+    seq_df: DataFrame
+        updated version of seq_df with the MMseqs cluster labels listed in the mmseqs_id column
+    '''
     if method == 'setcover':
         method_index = '0'
     elif method == 'conncomp':
@@ -772,7 +729,7 @@ def run_mmseqs_clust(seq_df, min_id, method, tmp_dir, ncpus):
             f.write(f">{row['sequence_id']}\n{row['VHH']}\n") #Index here is the intermediate_id
             
     #run mmseqs clustering
-    result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs', 'easy-cluster',
+    result = subprocess.run(['singularity', 'exec', mmseqs_sif, 'mmseqs', 'easy-cluster',
                             f'{tmp_dir}/mmseqs_in.fasta', f'{tmp_dir}/mmseqs_out', f'{tmp_dir}/tmp',
                              '-s', '7.5', #sensitivity set to max
                              '-c', str(max(0,(min_id - 0.2))), #set this lower than seq-id cutoff so it doesn't have an impact
@@ -804,7 +761,36 @@ def run_mmseqs_clust(seq_df, min_id, method, tmp_dir, ncpus):
     return seq_df
 
 def recursive_mmseqs_split(group, max_group_size, min_id, id_step, method, tmp_dir, ncpus):
+    '''
+    Recursively run MMseqs2 clustering with increasing min_id values until all clusters are below the given size limit.
     
+    Parameters
+    ----------
+    group: DataFrame
+        pandas DataFrame containing sequence info for the sequences to be clustered
+        must contain the following columns
+            VHH: the amino acid sequence
+            sequence_id: unique identifier for each sequence
+    max_group_size: int
+        the maximum allowed group size - recursion runs until all clusters are not larger than this
+    min_id: float
+        minimum identity (in the range [0,1]) for MMseqs to group sequences together
+    id_step: float
+        the setp size to increment min_id by at each recursive step
+    method: str
+        the name of the clustering method for MMseqs to use (setcover or conncomp)
+    tmp_dir: str
+        the directory to put temp files in
+    ncpus: int
+        the number of cores to parallelize MMseqs calculations over
+        
+    Returns
+    -------
+    group: DataFrame
+        updated version of group with the MMseqs cluster labels listed in the mmseqs_id column
+    max_min_id: float
+        the maximum min_id value used in all recursive layers
+    '''
     group_index = group.index.copy()
     
     #base case (if smaller than max allowed)
@@ -827,54 +813,27 @@ def recursive_mmseqs_split(group, max_group_size, min_id, id_step, method, tmp_d
             max_min_id = max(max_min_id,sg_min_id)
             
         return pd.concat(subgroups,axis=0), max_min_id
-
-def group_meta_dist(clust1,clust2,method):
-    dists = cdist(clust1, clust1, metric='hamming').flatten()
-    if method == 'single':
-        return np.min(dists)
-    if method == 'average':
-        return np.mean(dists)
-    if method == 'complete':
-        return np.max(dists)
-    raise Exception(f'{method} is not a valid method.')
-
-def recursive_spectral_clustering(group, id_cols, min_id, agg_method, spec_method, spec_ncomp, min_sim):
-    
-    dists = pdist(group.loc[:,id_cols].values,metric='hamming')
-    if agg_method == 'single':
-        dist_summary = np.min(dists)
-    elif agg_method == 'average':
-        dist_summary = np.mean(dists)
-    elif agg_method == 'complete':
-        dist_summary = np.max(dists)
-    
-    #base case (if distances are small enough, or only one member of group)
-    if (dist_summary <= (1-min_id)) or (len(group)==1):
-        group['meta_clone_id'] = group['spec_clone_id'].to_numpy()[0] #arbitrarily use first one
-        # print('Done:', len(group),dist_summary,flush=True)
-        return group
-    #otherwise split into groups recursively with spectral clustering
-    else:
-        # print('Splitting:', len(group),dist_summary,flush=True)
-        
-        #remove old clusters and add new ones
-        group = group.drop(columns=['meta_clone_id'],errors='ignore')
-        
-        clusterer = SpectralClustering(n_clusters = 2,
-                                       n_components = min(spec_ncomp,len(group)-1),
-                                       affinity = 'precomputed',
-                                       assign_labels = spec_method,
-                                       n_jobs=-1)
-        group['meta_clone_id'] = clusterer.fit_predict(squareform(1-dists+min_sim))
-
-        subgroups = []
-        for _,subgroup in group.groupby('meta_clone_id'):
-            split = recursive_spectral_clustering(subgroup, id_cols, min_id, agg_method, spec_method, spec_ncomp, min_sim)
-            subgroups.append(split)
-
-        return pd.concat(subgroups,axis=0)
         
 def add_header(df, header_names, sample_df):
+    '''
+    Add a header to the given DataFrame with information about each column.
+    
+    Parameters
+    ----------
+    df: DataFrame
+        pandas DataFrame to add the header to
+        must have columns starting with 'gfold' or 'enrich' to add header info to
+    header_names: list
+        list of column names in sample_df to pull info from for header
+    sample_df: DataFrame
+        pandas DataFrame with metadata on columns in df
+        must have columns matching header names and a column names no_rep with entries corresponding to suffixes of gfold and enrich columns in df
+        
+    Returns
+    -------
+    df: DataFrame
+        an updated version of df containing the requested header
+    '''
     header = []
     for col in df.columns:
         #for enrighment and gfold columns, look for label inside raw data column names
@@ -898,16 +857,3 @@ def add_header(df, header_names, sample_df):
             
     df.columns = pd.MultiIndex.from_tuples(header,names=header_names+['full_name'])
     return df
-
-def norm_dist(seq1,seq2):
-    return distance(seq1,seq2)/max(len(seq1),len(seq2))
-                        
-def cluster_ratio_score(seqs,max_diff,pool):
-    if len(seqs) == 1:
-        return 0
-    
-    dists = np.array(pool.starmap(norm_dist,((s1,s2) for i,s1 in enumerate(seqs[:-1]) for s2 in seqs[i+1:])))
-    tot_good = np.sum(dists<=max_diff)
-    tot_bad = np.sum(dists>max_diff)
-        
-    return tot_good/(tot_bad+1)

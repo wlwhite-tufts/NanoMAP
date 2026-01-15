@@ -31,6 +31,8 @@ def get_args():
     return parser.parse_args()
 
 if __name__ == '__main__':
+    args = get_args()
+    
     GS_file = args.in_file #input global set file
     samples = args.sample_file #file describing which samples to load and what names to give them
     pairs = args.pair_file #file describing which samples to use for enrichment analysis

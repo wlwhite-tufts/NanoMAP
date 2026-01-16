@@ -27,7 +27,7 @@ from analysis.fast_silhouette_score import weighted_ANARCI_silhouette_fast
 def get_args():
     #get user inputs
     parser = argparse.ArgumentParser(prog='Cluster Based on ANARCI alignment',
-                                     description='Collect sequences from input folder and cluster them using an agglomerative clustering method.')
+                                     description='Collect sequences from input folder (or subfolders directly within it) and cluster them using an agglomerative meta-clustering method.')
     #I/O args
     parser.add_argument('--in_dir',type=str,help='The directory that contains the assembled sequences. Looks for *db-pass.tsv, or */*db-pass.tsv')
     parser.add_argument('--out_file',type=str,help='Name for the output file (can include file path).')
@@ -577,9 +577,8 @@ if __name__ == '__main__':
     pool = Pool(processes=ncpus)
     print(f'Connected to pool with {ncpus} cpus.',flush=True)
     
-    #parse output folder anf file names
-    if args.out_file[0] != '/':
-        args.out_file = './'+args.out_file
+    #parse output folder and file names
+    args.out_file = os.path.realpath(args.out_file)
     out_dir = '/'.join(args.out_file.split('/')[:-1])+'/'
     print('out_dir = ',out_dir)
     out_fname = args.out_file.split('/')[-1]

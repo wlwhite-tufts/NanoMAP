@@ -3,6 +3,13 @@ from glob import glob
 import os
 import subprocess
 import numpy as np
+import sys
+
+#get main dir for repo
+repo_path = os.path.dirname(os.path.abspath(__file__))
+repo_path = '/'.join(repo_path.split('/')[:-1])
+sys.path.append(repo_path)
+from data.user_data import R1_primer_file, R2_primer_file
 
 def get_args(path):
     
@@ -12,10 +19,8 @@ def get_args(path):
     parser.add_argument('--in_dir',type=str,help='The directory that contains the fastq(.gz) files.')
     parser.add_argument('--cmd_file',type=str,help='Name for the command file to write.')
     parser.add_argument('--N',type=int,help='The number of samples to put in each batch. Each sample has 2 fastq files.')
-    parser.add_argument('--primer_R1',type=str,default=f'{path}/data/primers/AlpVHH_R1_primers_05Feb24.fasta',
-                        help='fasta file with the R1 primer definitions.')
-    parser.add_argument('--primer_R2',type=str,default=f'{path}/data/primers/AlpVHH_R2_primers_05Feb24.fasta',
-                        help='fasta file with the R2 primer definitions.')
+    parser.add_argument('--primer_R1',type=str,default=f'{R1_primer_file}',help='fasta file with the R1 primer definitions.')
+    parser.add_argument('--primer_R2',type=str,default=f'{R2_primer_file}',help='fasta file with the R2 primer definitions.')
     parser.add_argument('--assembly_script',type=str,default=f'{path}/processing/assemble_and_filter_reads.py',
                         help='The script to use when writing assembly commands.')
     parser.add_argument('--assembly_dir',type=str,default='assembly',

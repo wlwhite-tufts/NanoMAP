@@ -19,6 +19,8 @@ def get_args(path):
     parser.add_argument('--in_dir',type=str,help='The directory that contains the fastq(.gz) files.')
     parser.add_argument('--cmd_file',type=str,help='Name for the command file to write.')
     parser.add_argument('--N',type=int,help='The number of samples to put in each batch. Each sample has 2 fastq files.')
+    parser.add_argument('--read_ids',type=str,nargs=2,default=['_L001_R1_001.fastq','_L001_R2_001.fastq'],
+                        help='The forward and reverse read file siffixes, in that order.')
     parser.add_argument('--primer_R1',type=str,default=f'{R1_primer_file}',help='fasta file with the R1 primer definitions.')
     parser.add_argument('--primer_R2',type=str,default=f'{R2_primer_file}',help='fasta file with the R2 primer definitions.')
     parser.add_argument('--assembly_script',type=str,default=f'{path}/processing/assemble_and_filter_reads.py',
@@ -66,4 +68,6 @@ if __name__ == '__main__':
                       f'--in_dir {args.in_dir}/batch{b} '+\
                       f'--out_dir {args.assembly_dir} '+\
                       f'--primer_R1 {args.primer_R1} '+\
-                      f'--primer_R2 {args.primer_R2}\n')
+                      f'--primer_R2 {args.primer_R2} '+\
+                      f'--R1_suffix {args.read_ids[0]} '+\
+                      f'--R2_suffix {args.read_ids[1]}\n')

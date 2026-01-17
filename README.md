@@ -1,3 +1,5 @@
+
+<img width="1056" height="380" alt="NanoMAP_logo" src="https://github.com/user-attachments/assets/8d291278-0edb-4222-9c0e-359f3bb51860" />
 This repository contains code for processing and analyzing VHH (nanobody) sequences using NanoMAP.
 
 # Installation

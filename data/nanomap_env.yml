@@ -9,6 +9,7 @@ dependencies:
   - scikit-learn
   - scipy
   - biopython
+  - pip
   - pip:
     - glob
     - tqdm

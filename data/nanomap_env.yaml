@@ -1,0 +1,15 @@
+name: nanomap
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pandas
+  - numpy
+  - scikit-learn
+  - scipy
+  - biopython
+  - pip:
+    - glob
+    - tqdm
+    - Levenshtein

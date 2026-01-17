@@ -9,30 +9,37 @@ from tqdm import tqdm
 import argparse
 from scipy.spatial.distance import squareform
 
-sys.path.append('/cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/')
-from src.utils.python_utils import weighted_anarci_dist, ANARCI_dist_row, get_fam_reps, fill_in_weighted_anarci_dists, approx_avg_internal_anarci_dist, \
-                                   get_pairwise_cluster_rep_distances, agg_clust_to_max_extra_reps, get_anarci_alignment
+#get main dir for repo
+repo_path = os.path.dirname(os.path.abspath(__file__))
+repo_path = '/'.join(repo_path.split('/')[:-1])
+sys.path.append(repo_path)
+from utils import weighted_anarci_dist, ANARCI_dist_row, get_fam_reps, fill_in_weighted_anarci_dists, approx_avg_internal_anarci_dist, \
+                  get_pairwise_cluster_rep_distances, agg_clust_to_max_extra_reps, get_anarci_alignment
+from data.user_data import mmseqs_sif
 
-#get user inputs
-parser = argparse.ArgumentParser(prog='Sequence-based evaluation of clutering quality',
-                                 description='Calculate the silhouette score based on CDR distance for a given (set of) clustering(s)..')
-#I/O args
-parser.add_argument('--in_file',type=str,help='csv file containing sequence and cluster label info')
-parser.add_argument('--out_file',type=str,help='Name for the output file (can include file path).')
-parser.add_argument('--label_columns',type=str,nargs='*',help='Which column(s) contain the cluster labels to be evaluated')
-parser.add_argument('--drop_duplicates',type=str,default='VHH',help='Which column to use to drop duplicate entries before scoring. Set to "none" to skip this step.')
-
-
-#distance function args
-parser.add_argument('--CDR3_weight',type=float,default=3, help='Weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
-parser.add_argument('--max_len_diff',type=int,default=3, help='Maximum allowed difference in CDR length. Distance is set to 1 if this is exceeded.')
-
-#scoring args
-parser.add_argument('--score_top_N',type=int,default=10,help='When calculating inter-family distances, calcualte weighted distances to the top score_top_N MMseqs hits for each family representative.')
-parser.add_argument('--min_clust_reps',type=int,default=10,help='When calculating inter-family distances, select at least the top min_clust_reps most abundant members to represent each family.')
-parser.add_argument('--max_extra_reps',type=int,default=150,help='When calculating inter-family distances, split clusterings into groups of no more than max_group_size members based on the overlap of their representatives.')
-parser.add_argument('--sample_N_pairs',type=int,default=1000,help='When calculating intra-family distances, calcualte weighted distances for a random sampling of sample_N_pairs pairs of sequences within the cluster.')
-
+def get_args():
+    #get user inputs
+    parser = argparse.ArgumentParser(prog='Sequence-based evaluation of clutering quality',
+                                     description='Calculate the silhouette score based on CDR distance for a given (set of) clustering(s)..')
+    #I/O args
+    parser.add_argument('--in_file',type=str,help='csv file containing sequence and cluster label info')
+    parser.add_argument('--out_file',type=str,help='Name for the output file (can include file path).')
+    parser.add_argument('--label_columns',type=str,nargs='*',help='Which column(s) contain the cluster labels to be evaluated')
+    parser.add_argument('--drop_duplicates',type=str,default='VHH',help='Which column to use to drop duplicate entries before scoring. Set to "none" to skip this step.')
+    
+    
+    #distance function args
+    parser.add_argument('--CDR3_weight',type=float,default=3, help='Weight for CDR3 in weighted distance calculations. Uses a weight of 1 for CDR1 and CDR2.')
+    parser.add_argument('--max_len_diff',type=int,default=3, help='Maximum allowed difference in CDR length. Distance is set to 1 if this is exceeded.')
+    
+    #scoring args
+    parser.add_argument('--score_top_N',type=int,default=10,help='When calculating inter-family distances, calcualte weighted distances to the top score_top_N MMseqs hits for each family representative.')
+    parser.add_argument('--min_clust_reps',type=int,default=10,help='When calculating inter-family distances, select at least the top min_clust_reps most abundant members to represent each family.')
+    parser.add_argument('--max_extra_reps',type=int,default=150,help='When calculating inter-family distances, split clusterings into groups of no more than max_group_size members based on the overlap of their representatives.')
+    parser.add_argument('--sample_N_pairs',type=int,default=1000,help='When calculating intra-family distances, calcualte weighted distances for a random sampling of sample_N_pairs pairs of sequences within the cluster.')
+    
+    return parser.parse_args()
+    
 def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, min_n_reps, max_extra_reps, dist_param_map, sample_N_pairs, pool, ncpus, tmp_dir):
     
     full_df = full_df.copy()
@@ -60,8 +67,8 @@ def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, min_n_reps, max_extra
             for i,row in all_reps.iterrows():
                 f.write(f'>{row.name}\n{row["VHH"]}\n')
                 
-        result = subprocess.run(['singularity', 'exec', '/cluster/tufts/biocontainers/images/quay.io_biocontainers_mmseqs2:17.b804f--hd6d6fdc_1.sif', 'mmseqs',
-                                 'easy-search', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/mmseqs_results', tmp_dir,
+        result = subprocess.run(['singularity', 'exec', mmseqs_sif, 'mmseqs', 'easy-search',
+                                f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/tmp_silhouette_mmseqs.fasta', f'{tmp_dir}/mmseqs_results', tmp_dir,
                                  '-s', '7.5', #sensitivity
                                  '-c', '0', #don't filter on coverage
                                  '--min-seq-id', '0', #don't filter here because we want to have full distribution info
@@ -139,7 +146,7 @@ def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, min_n_reps, max_extra
 
 if __name__ == '__main__':
     
-    args = parser.parse_args()
+    args = get_args()
     
     #set up for parallelization
     ncpus = int(os.environ['SLURM_JOB_CPUS_PER_NODE'])

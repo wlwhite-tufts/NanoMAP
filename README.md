@@ -1,6 +1,16 @@
 This repository contains code for processing and analyzing VHH (nanobody) sequences using NanoMAP.
 
 # Installation
+## Setup the conda environment
+1. Navigate into the directory where you've cloned this repo and run the following command:
+```
+conda create -n nanomap -f data/nanomap_env.yaml
+```
+2. Install ANARCI, following the instructions in their GitHub repo: https://github.com/oxpig/ANARCI
+3. Install R, following the instructions here: https://www.r-project.org/
+4. Install singularity, following the instructions here: https://apptainer.org/docs/user/main/quick_start.html#installation
+
+## Install IgBLAST (with our updated alpaca V/J segments)
 
 # NanoMAP Meta-clustering Pipeline
 This pipeline starts with a group of fastq(.gz) files resulting from a paired-end sequencing run and produces clustered sequences with enrichment values calculated per cluster and per sequence. Each pair of fastq files (forward and reverse reads) should correspond to a single sample.
@@ -61,3 +71,24 @@ Both files will have the same columns, which include all of the columns that wer
 1. Raw reads - there will be one of these columns per row in `sample_info.csv`, with the raw read counts for each sequence (or cluster) in each sample. These column names will exactly match the values in the `name` column of `sample_info.csv`.
 2. enrichments - there will be one of these columns per row in `enrich_pairs.csv`, with the log of the ratio of the read counts for the samples described by that row. These column names will look like `enrich_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.
 3. gfold - there will be one of these columns per row in `enrich_pairs.csv`, with the gfold value comparing the samples described by that row. These column names will look like `gfold01_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.
+
+## Scoring (optional)
+To evaluate the quality of your clustering you can calculate the scores below.
+
+### Silhouette score
+The following code approximates the silhouette score as described in the NanoMAP manuscript. The score varies from -1 (for very bad clusterings), to 1 (for clusterings where each member of each cluster is distance 0 from all other members of the cluster and sitance 1 from all other sequences).\
+You can calculate the silhouette score with the following command:
+```
+cd <directory where you clustering results are>
+python <path to NanoMAP>/analysis/silhouette_score.py --in_file metaclustered_data.csv --out_file sil_score.csv --label_cols meta_clone_id_single_0.25
+```
+
+### Phenotypic quality score
+The following code approximates the phenotypuc quality score as described in the NanoMAP manuscript (without the final rescaling step). The score has no theoretical bounds, but higher scores are better.
+IMPORTANT: The phenotypic quality score is dependent on the size of the dataset, with smaller datasets producing lower scores even when the quality of the clustering is held fixed.
+You can calculate the phenotypic quality score with the following command:
+```
+cd <directory where you clustering results are>
+python <path to NanoMAP>/analysis/phenotype_quality.py --in_file metaclustered_data_gfold_vhh.csv --out_file phen_score.csv --label_cols meta_clone_id_single_0.25 --phenotype_cols <your columns here>
+```
+Before running, make sure to set the `--phenotype_cols` flag to indicate which columns in your clustering file contain binding data. These columns could be any subset of the `enrich_{name}` or `gfold01_{name}` columns produced by the `enrichment.py` script.

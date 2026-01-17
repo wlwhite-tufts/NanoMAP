@@ -59,7 +59,7 @@ def ranksum_score_single(dists_within, dists_between):
                     alternative='less',
                     nan_policy='omit').statistic
     
-    return score
+    return -score
     
 def ranksum_score_multilabel(idx, N, N_labels, N_pheno, dist_metric, rand):
     '''

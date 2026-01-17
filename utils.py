@@ -365,6 +365,57 @@ def weighted_anarci_dist(CDR_list1,CDR_list2,weight_scheme,max_len_diffs):
         
     return dist_tot/weight_tot #compute weighted percent identity
     
+def ANARCI_dist_row(CDR_list1,CDR_list_list,weight_scheme,max_len_diffs):
+    '''
+    Wrapper to calculate distances from a single VHH sequence to all VHHs in a list
+    Intended for calculation ofone row in a pairwise distance matix.
+    
+    Parameters
+    ----------
+    CDR_list1: list
+        list containing the CDR sequences for the first sequence
+        CDR_list1[i] is the CDRi sequence
+    CDR_list_list: list
+        list containing the lists of CDR sequences for all sequences to compare to
+        CDR_list_list[j][i] is the CDRi sequence for VHH j
+    weight_scheme: list
+        list of weights for mismatches in each CDR
+        weight of mismatch for CDRi is weight_scheme[i]
+    max_len_diffs: list
+        list of maximum allowed differene in length for each CDR
+        max different for CDRi is max_len_diffs[i]
+        
+    Returns
+    -------
+    dists: list
+        list of distances between each VHH in CDR_list_list and CDR_list1
+    '''
+    return [weighted_anarci_dist(CDR_list1,CDR_list2,weight_scheme,max_len_diffs) for CDR_list2 in CDR_list_list]
+    
+def ANARCI_dist_pairs(pair_list,weight_scheme,max_len_diffs):
+    '''
+    Wrapper to calculate distances berween arbitrary pairs of VHHs
+
+    Parameters
+    ----------
+    pair_list: list
+        list containing the CDR sequences for the pairs to be compared
+        pair_list[j][0][i] is the CDRi sequence for the first member of pair j
+        pair_list[j][1][i] is the CDRi sequence for the second member of pair j
+    weight_scheme: list
+        list of weights for mismatches in each CDR
+        weight of mismatch for CDRi is weight_scheme[i]
+    max_len_diffs: list
+        list of maximum allowed differene in length for each CDR
+        max different for CDRi is max_len_diffs[i]
+        
+    Returns
+    -------
+    dists: list
+        list of distances for each VHH pair in pair_list
+    '''
+    return [weighted_anarci_dist(*pair,weight_scheme,max_len_diffs) for pair in pair_list]
+    
 def fill_in_weighted_anarci_dists(dist_df, info_df, dist_col, weight_scheme, max_len_diff, pool, ncpus):
     '''
     Given a DataFrame of VHH pairs with some distances calculated and a set of pairs to get distances between,

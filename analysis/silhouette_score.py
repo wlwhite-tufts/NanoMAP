@@ -24,7 +24,7 @@ def get_args():
     #I/O args
     parser.add_argument('--in_file',type=str,help='csv file containing sequence and cluster label info')
     parser.add_argument('--out_file',type=str,help='Name for the output file (can include file path).')
-    parser.add_argument('--label_columns',type=str,nargs='*',help='Which column(s) contain the cluster labels to be evaluated')
+    parser.add_argument('--label_cols',type=str,nargs='*',help='Which column(s) contain the cluster labels to be evaluated')
     parser.add_argument('--drop_duplicates',type=str,default='VHH',help='Which column to use to drop duplicate entries before scoring. Set to "none" to skip this step.')
     
     
@@ -40,8 +40,29 @@ def get_args():
     
     return parser.parse_args()
     
-def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, min_n_reps, max_extra_reps, dist_param_map, sample_N_pairs, pool, ncpus, tmp_dir):
+def weighted_ANARCI_silhouette(full_df, id_cols, score_top_N, min_n_reps, max_extra_reps, dist_param_map, sample_N_pairs, pool, ncpus, tmp_dir):
+    '''
+    Calculate the approximate silhouette score for a each provided clustering.
+    Groups clusterings with highly overlapping sets of representatives together to reduce the number of distance calculations needed. This may introduce additional representatives which could slightly change the score.
     
+    Parameters
+    ----------
+    full_df: DataFrame
+        the DataFrame with the sequence and cluster label info
+        must include all columns listed in id_cols and:
+            CDR1: the CDR1 amino acid sequence
+            CDR2: the CDR2 amino acid sequence
+            CDR3: the CDR3 amino acid sequence
+    id_cols: list
+        list of column names in full_df that have the cluster labels for the clusterings to score
+    score_top_N: int
+        how many of the closest cluster-external neighbors to include in the average between-cluster distance calculation for each cluster representative
+    min_n_reps: int
+        the minimum number of representatives to take for each cluster
+    max_extra_reps:  int
+        the maximum number of "extra representatives" allowed in a group of clusterings
+        the 
+    '''
     full_df = full_df.copy()
     
     #get groupings that are relatively similar to each other
@@ -75,7 +96,7 @@ def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, min_n_reps, max_extra
                                  '--local-tmp', tmp_dir,
                                  '--format-output', 'query,target,pident',
                                  '--max-seq-id','1.0', #do not do any redundancy filtering
-                                 '--max-seqs', str(mmseqs_n+max_reps), #look at best seq for each query (add min_n_reps to account for finding other sequences representing the same cluster)
+                                 '--max-seqs', str(score_top_N+max_reps), #look at best seq for each query (add min_n_reps to account for finding other sequences representing the same cluster)
                                  '-v', '0',
                                  '--threads', str(ncpus)])
         assert result.returncode == 0
@@ -104,8 +125,8 @@ def weighted_ANARCI_silhouette(full_df, id_cols, mmseqs_n, min_n_reps, max_extra
             #get rid of pairs within the same cluster
             mmseqs_subset = mmseqs_df[mmseqs_df[id_col+'_query']!=mmseqs_df[id_col+'_target']]
             
-            #take top mmseqs_n MMseqs scores for each query
-            mmseqs_subset = mmseqs_subset.sort_values(by='pident',ascending=False).groupby('query').head(mmseqs_n)
+            #take top score_top_N MMseqs scores for each query
+            mmseqs_subset = mmseqs_subset.sort_values(by='pident',ascending=False).groupby('query').head(score_top_N)
             
             #calculate dists as needed
             dist_idx = dist_idx_map[dist_param_map[id_col]]
@@ -173,7 +194,7 @@ if __name__ == '__main__':
     else:
         tmp_dir = '/'.join(args.out_file.split('/')[:-1])+f'/tmp_{tmp_idx}'
     
-    dist_param_map = {col:(args.CDR3_weight,args.max_len_diff) for col in args.label_columns}
+    dist_param_map = {col:(args.CDR3_weight,args.max_len_diff) for col in args.label_cols}
     
-    score_df = weighted_ANARCI_silhouette(data, args.label_columns, args.score_top_N, args.min_clust_reps, args.max_extra_reps, dist_param_map, args.sample_N_pairs, pool, ncpus, tmp_dir)
+    score_df = weighted_ANARCI_silhouette(data, args.label_cols, args.score_top_N, args.min_clust_reps, args.max_extra_reps, dist_param_map, args.sample_N_pairs, pool, ncpus, tmp_dir)
     score_df.to_csv(args.out_file)

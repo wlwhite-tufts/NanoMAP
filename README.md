@@ -12,6 +12,18 @@ conda create -f data/nanomap_env.yaml
 
 ## Install IgBLAST (with our updated alpaca V/J segments)
 
+## Download MMseqs2 and GFold sif files
+```
+cd <your NanoMAP folder>
+mkdir sif
+cd sif
+wget XXXXX #need to update once the sif files are available publicly
+```
+
+## Input your local paths
+Edit the `data/user_data.py` file to match the locations on your machine where you cloned this repo and downloaded the sif files.
+If you are going to be consistently using the same primers to amplify your cDNA for sequencing, create one fasta file for the forward primer(s), and one for the reverse primer(s) and update the primer section of `data/user_data.py` to provide the locations of those fasta files.
+
 # NanoMAP Meta-clustering Pipeline
 This pipeline starts with a group of fastq(.gz) files resulting from a paired-end sequencing run and produces clustered sequences with enrichment values calculated per cluster and per sequence. Each pair of fastq files (forward and reverse reads) should correspond to a single sample.
 

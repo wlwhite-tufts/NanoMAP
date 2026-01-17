@@ -11,6 +11,6 @@ dependencies:
   - biopython
   - pip
   - pip:
-    - glob
+    - glob2
     - tqdm
     - Levenshtein

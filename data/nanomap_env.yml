@@ -13,4 +13,4 @@ dependencies:
   - pip:
     - glob2
     - tqdm
-    - Levenshtein
+    - levenshtein

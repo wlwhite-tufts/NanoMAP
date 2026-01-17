@@ -13,8 +13,8 @@ conda create -f data/nanomap_env.yaml
 ## Install IgBLAST (with our updated alpaca V/J segments)
 
 ## Download MMseqs2 and GFold sif files
+Navigate into the directory where you've cloned this repo and run the following commands:
 ```
-cd <your NanoMAP folder>
 mkdir sif
 cd sif
 wget XXXXX #need to update once the sif files are available publicly

@@ -4,9 +4,10 @@ This repository contains code for processing and analyzing VHH (nanobody) sequen
 
 # Installation
 ## Setup the conda environment
-1. Navigate into the directory where you've cloned this repo and run the following command:
+1. Navigate into the directory where you've cloned this repo and run the following commands:
 ```
 conda env create -f data/nanomap_env.yml
+conda activate nanomap
 ```
 2. Install ANARCI, following the instructions in their GitHub repo: https://github.com/oxpig/ANARCI
 3. Install R, following the instructions here: https://www.r-project.org/

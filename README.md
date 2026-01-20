@@ -20,7 +20,10 @@ Navigate into the directory where you've cloned this repo and run the following 
 ```
 mkdir sif
 cd sif
-wget XXXXX #need to update once the sif files are available publicly
+singularity pull https://depot.galaxyproject.org/singularity/mmseqs2:17.b804f--hd6d6fdc_1
+mv mmseqs2:17.b804f--hd6d6fdc_1 mmseqs2-17.b804f.sif
+singularity pull https://depot.galaxyproject.org/singularity/gfold_1.1.4--gsl1.16_1
+mv gfold_1.1.4--gsl1.16_1 gfold-1.1.4.sif
 ```
 
 ## Input your local paths
@@ -99,8 +102,8 @@ python <path to NanoMAP>/analysis/silhouette_score.py --in_file metaclustered_da
 ```
 
 ### Phenotypic quality score
-The following code approximates the phenotypuc quality score as described in the NanoMAP manuscript (without the final rescaling step). The score has no theoretical bounds, but higher scores are better.
-IMPORTANT: The phenotypic quality score is dependent on the size of the dataset, with smaller datasets producing lower scores even when the quality of the clustering is held fixed.
+The following code approximates the phenotypuc quality score as described in the NanoMAP manuscript (without the final rescaling step). The score has no theoretical bounds, but higher scores are better.\
+IMPORTANT: The phenotypic quality score is dependent on the size of the dataset, with smaller datasets producing lower scores even when the quality of the clustering is held fixed.\
 You can calculate the phenotypic quality score with the following command:
 ```
 cd <directory where you clustering results are>

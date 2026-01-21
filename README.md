@@ -1,4 +1,3 @@
-
 <img width="1056" height="380" alt="NanoMAP_logo" src="https://github.com/user-attachments/assets/8d291278-0edb-4222-9c0e-359f3bb51860" />
 This repository contains code for processing and analyzing VHH (nanobody) sequences using NanoMAP.
 
@@ -18,8 +17,8 @@ conda activate nanomap
 ## Download MMseqs2 and GFold sif files
 Navigate into the directory where you've cloned this repo and run the following commands:
 ```
-mkdir sif
-cd sif
+mkdir data/sif
+cd data/sif
 singularity pull https://depot.galaxyproject.org/singularity/mmseqs2:17.b804f--hd6d6fdc_1
 mv mmseqs2:17.b804f--hd6d6fdc_1 mmseqs2-17.b804f.sif
 singularity pull https://depot.galaxyproject.org/singularity/gfold_1.1.4--gsl1.16_1
@@ -29,6 +28,30 @@ mv gfold_1.1.4--gsl1.16_1 gfold-1.1.4.sif
 ## Input your local paths
 Edit the `data/user_data.py` file to match the locations on your machine where you cloned this repo and downloaded the sif files.
 If you are going to be consistently using the same primers to amplify your cDNA for sequencing, create one fasta file for the forward primer(s), and one for the reverse primer(s) and update the primer section of `data/user_data.py` to provide the locations of those fasta files.
+
+## test that everything has been installed correctly
+Run the following commands, replacing `<your NanoMAP path>` with the directory where you cloned this repo.
+```
+cd <your NanoMAP path>/test
+conda activate nanomap
+./run_test.sh
+```
+If the installation was successful, this script will run for ~10-15min without errors, and produce the following files:
+```
+assembly_cmds.sh
+assembly/test1_db-pass.tsv
+assembly/test2_db-pass.tsv
+assembly/test3_db-pass.tsv
+assembly/test4_db-pass.tsv
+
+metaclust.csv
+metaclust_tabulated.csv
+metaclust_gfold_vhh.csv
+metaclust_gfold_fam.csv
+
+sil_score.csv
+pheno_score.csv
+```
 
 # NanoMAP Meta-clustering Pipeline
 This pipeline starts with a group of fastq(.gz) files resulting from a paired-end sequencing run and produces clustered sequences with enrichment values calculated per cluster and per sequence. Each pair of fastq files (forward and reverse reads) should correspond to a single sample.
@@ -47,7 +70,7 @@ Before running the command, fill in the `<your text here>` fields and change the
 Next, run the assembly and filtering commands in `assembly_cmds.sh`, or submit them as an array job with SLURM. Each line in the `assembly_cmds.sh` file is a command to process a single batch of fastq files, and can be run independently of the other commands in the file. If any of the runs are interrupted in the middle, the corresponding command can simply be re-run and will pick up where it left off.\
 \
 Once all the assembly/filtering commands are finished running, you should have a directory called `assembly` containing two types of files:\
-`{sample_id}_db-pass.tsv` - these are the assembled and filtered reads, there should be one per sample
+`{sample_id}_db-pass.tsv` - these are the assembled and filtered reads, there should be one per sample\
 `{sample_id}_chkpt.txt` - these are no longer necessary and can be deleted
 
 ## Clustering
@@ -85,7 +108,7 @@ python <path to NanoMAP>/analysis/enrichment.py --in_file metaclustered_data.csv
 The result will be two new csv files:
 `metaclustered_data_gfold_vhh.csv` - each row corresponds to a distinct amino acid sequence\
 `metaclustered_data_gfold_fam.csv` - each row corresponds to a distinct cluster (a.k.a. clonal family)\
-Both files will have the same columns, which include all of the columns that were in `metaclustered_data.csv` plus three new sets of columns:\
+Both files will have the same columns, which include all of the columns that were in `metaclustered_data.csv` plus three new sets of columns:
 1. Raw reads - there will be one of these columns per row in `sample_info.csv`, with the raw read counts for each sequence (or cluster) in each sample. These column names will exactly match the values in the `name` column of `sample_info.csv`.
 2. enrichments - there will be one of these columns per row in `enrich_pairs.csv`, with the log of the ratio of the read counts for the samples described by that row. These column names will look like `enrich_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.
 3. gfold - there will be one of these columns per row in `enrich_pairs.csv`, with the gfold value comparing the samples described by that row. These column names will look like `gfold01_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.

@@ -10,7 +10,7 @@ conda activate nanomap
 ```
 2. Install ANARCI, following the instructions in their GitHub repo: https://github.com/oxpig/ANARCI
 3. Install R, following the instructions here: https://www.r-project.org/
-4. Install singularity, following the instructions here: https://apptainer.org/docs/user/main/quick_start.html#installation
+4. Install singularity, following the instructions here: https://docs.sylabs.io/guides/3.0/user-guide/installation.html#installation
 
 ## Install IgBLAST (with our updated alpaca V/J segments)
 

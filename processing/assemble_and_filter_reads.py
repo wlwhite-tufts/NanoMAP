@@ -127,12 +127,11 @@ if __name__ == '__main__':
                 
         #remove leftover files, if requested
         if not args.save_intermediates:
-            os.remove(f'{args.out_dir}/{name}_atleast-1.fasta')
-            os.remove(f'{args.out_dir}/{name}_under-1.fasta')
-            os.remove(f'{args.out_dir}/{name}_db-fail.tsv')
-            os.remove(f'{args.out_dir}/MakeDb_{name}.log')
-            
-            
-            
-            
+            to_remove = ['{args.out_dir}/{name}_atleast-1.fasta',
+                        f'{args.out_dir}/{name}_under-1.fasta',
+                        f'{args.out_dir}/{name}_db-fail.tsv',
+                        f'{args.out_dir}/MakeDb_{name}.log']
+            for file in to_remove:
+                if os.path.isfile(file):
+                    os.remove(file)
             

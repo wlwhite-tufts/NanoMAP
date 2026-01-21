@@ -174,4 +174,4 @@ cython_debug/
 .pypirc
 
 #don't include big files
-sif/
+data/sif/

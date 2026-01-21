@@ -842,6 +842,9 @@ def recursive_mmseqs_split(group, max_group_size, min_id, id_step, method, tmp_d
     max_min_id: float
         the maximum min_id value used in all recursive layers
     '''
+    #in case recursion tries to go too far
+    min_id = min(1,min_id)
+    
     group_index = group.index.copy()
     
     #base case (if smaller than max allowed)

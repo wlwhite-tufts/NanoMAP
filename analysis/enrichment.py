@@ -33,7 +33,7 @@ def get_args():
 if __name__ == '__main__':
     args = get_args()
     
-    GS_file = args.in_file #input global set file
+    GS_file = os.path.realpath(args.in_file) #input global set file
     samples = args.sample_file #file describing which samples to load and what names to give them
     pairs = args.pair_file #file describing which samples to use for enrichment analysis
     
@@ -74,10 +74,7 @@ if __name__ == '__main__':
     global_set = global_set.sort_values(by=['VHH_duplicate_count','duplicate_count'],ignore_index=True,ascending=False) #highest first
     
     #save global set with count info
-    global_set.to_csv(GS_file.replace('_final_clusters',
-                                     f'{args.suffix}_tabulated_seq').replace('_clust.csv',
-                                                                            f'{args.suffix}_tabulated_seq.csv').replace('_metaclustering.csv',
-                                                                                                                       f'{args.suffix}_tabulated_seq.csv'),index=False)
+    global_set.to_csv(GS_file.replace('.csv','_tabulated.csv'),index=False)
             
     ####################
     # calculate fold changes based on VHH-aggregated or clone_id-aggregated data

@@ -9,6 +9,8 @@ dependencies:
   - scikit-learn
   - scipy
   - biopython
+  - matplotlib
+  - seaborn
   - pip
   - pip:
     - glob2

@@ -42,7 +42,7 @@ ncbi-igblast-1.22.0/bin/makeblastdb -parse_seqids -dbtype nucl -in ncbi-igblast-
 ```
 Then move and rename the files to match what IgBLAST expects:
 ```
-cp -r ncbi-igblast-1.22.0/database/alpaca_clean ncbi-igblast-1.22.0/internal_data
+cp -r ncbi-igblast-1.22.0/database/alpaca_clean ncbi-igblast-1.22.0/internal_data/
 mv ncbi-igblast-1.22.0/internal_data/alpaca_clean ncbi-igblast-1.22.0/internal_data/alpaca
 
 mv ncbi-igblast-1.22.0/database/alpaca/alpaca.ndm.imgt ncbi-igblast-1.22.0/internal_data/alpaca/

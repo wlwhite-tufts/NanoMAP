@@ -13,6 +13,48 @@ conda activate nanomap
 4. Install singularity, following the instructions here: https://docs.sylabs.io/guides/3.0/user-guide/installation.html#installation
 
 ## Install IgBLAST (with our updated alpaca V/J segments)
+Naviagte to a directory that you want to install IgBLAST in and run the following commands to download the package.
+```
+wget https://ftp.ncbi.nih.gov/blast/executables/igblast/release/LATEST/ncbi-igblast-1.22.0-x64-linux.tar.gz
+tar -xzvf ncbi-igblast-1.22.0-x64-linux.tar.gz
+rm ncbi-igblast-1.22.0-x64-linux.tar.gz
+```
+Then create some internal folders and copy our extended V and J segment lists into the IgBLAST directory:
+```
+mkdir ncbi-igblast-1.22.0/database
+mkdir ncbi-igblast-1.22.0/database/alpaca
+mkdir ncbi-igblast-1.22.0/database/alpaca_clean
+
+cp <your NanoMAP path>/data/IgBLAST_db/* ncbi-igblast-1.22.0/database/alpaca/
+```
+Replace `<your NanoMAP path>` with the path to the directory where you cloned this repo.\
+In addition to FASTA files for the V, D, and J segments, this copies over the alpaca_gl.aux and alpaca.ndm.imgt files which are used to supplement the FASTA files while utilizing the database.\
+\
+To parse through the sequencing data from the `alpaca` directory and convert it into an IgBLAST acceptable format in the `alpaca_clean` directory, run the following commands for the V, D, and J segments:
+```
+ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHV > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_V
+ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHD > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_D
+ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHJ > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_J
+
+ncbi-igblast-1.22.0/bin/makeblastdb -parse_seqids -dbtype nucl -in ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_V
+ncbi-igblast-1.22.0/bin/makeblastdb -parse_seqids -dbtype nucl -in ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_D
+ncbi-igblast-1.22.0/bin/makeblastdb -parse_seqids -dbtype nucl -in ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_J
+```
+Then move and rename the files to match what IgBLAST expects:
+```
+cp -r ncbi-igblast-1.22.0/database/alpaca_clean ncbi-igblast-1.22.0/internal_data
+mv ncbi-igblast-1.22.0/internal_data/alpaca_clean ncbi-igblast-1.22.0/internal_data/alpaca
+
+mv ncbi-igblast-1.22.0/database/alpaca/alpaca.ndm.imgt ncbi-igblast-1.22.0/internal_data/alpaca/
+mv ncbi-igblast-1.22.0/database/alpaca/alpaca_gl.aux ncbi-igblast-1.22.0/optional_file/
+
+mv ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_v ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_v.fasta
+mv ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_d ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_d.fasta
+mv ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_j ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_j.fasta
+mv ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHV ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHV.fasta
+mv ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHD ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHD.fasta
+mv ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHJ ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHJ.fasta
+```
 
 ## Download MMseqs2 and GFold sif files
 Navigate into the directory where you've cloned this repo and run the following commands:

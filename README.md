@@ -32,9 +32,9 @@ In addition to FASTA files for the V, D, and J segments, this copies over the al
 \
 To parse through the sequencing data from the `alpaca` directory and convert it into an IgBLAST acceptable format in the `alpaca_clean` directory, run the following commands for the V, D, and J segments:
 ```
-ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHV > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_V
-ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHD > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_D
-ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHJ > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_J
+ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHV.fasta > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_V
+ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHD.fasta > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_D
+ncbi-igblast-1.22.0/bin/edit_imgt_file.pl ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHJ.fasta > ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_J
 
 ncbi-igblast-1.22.0/bin/makeblastdb -parse_seqids -dbtype nucl -in ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_V
 ncbi-igblast-1.22.0/bin/makeblastdb -parse_seqids -dbtype nucl -in ncbi-igblast-1.22.0/database/alpaca_clean/alpaca_D
@@ -47,13 +47,6 @@ mv ncbi-igblast-1.22.0/internal_data/alpaca_clean ncbi-igblast-1.22.0/internal_d
 
 mv ncbi-igblast-1.22.0/database/alpaca/alpaca.ndm.imgt ncbi-igblast-1.22.0/internal_data/alpaca/
 mv ncbi-igblast-1.22.0/database/alpaca/alpaca_gl.aux ncbi-igblast-1.22.0/optional_file/
-
-mv ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_v ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_v.fasta
-mv ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_d ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_d.fasta
-mv ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_j ncbi-igblast-1.22.0/database/alpaca/imgt_alpaca_ig_j.fasta
-mv ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHV ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHV.fasta
-mv ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHD ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHD.fasta
-mv ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHJ ncbi-igblast-1.22.0/database/alpaca/IG_DNA/imgt_gapped_alpaca_IGHJ.fasta
 ```
 
 ## Download MMseqs2 and GFold sif files

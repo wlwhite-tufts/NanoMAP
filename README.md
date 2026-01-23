@@ -25,7 +25,7 @@ mkdir ncbi-igblast-1.22.0/database
 mkdir ncbi-igblast-1.22.0/database/alpaca
 mkdir ncbi-igblast-1.22.0/database/alpaca_clean
 
-cp <your NanoMAP path>/data/IgBLAST_db/* ncbi-igblast-1.22.0/database/alpaca/
+cp -r <your NanoMAP path>/data/IgBLAST_db/* ncbi-igblast-1.22.0/database/alpaca/
 ```
 Replace `<your NanoMAP path>` with the path to the directory where you cloned this repo.\
 In addition to FASTA files for the V, D, and J segments, this copies over the alpaca_gl.aux and alpaca.ndm.imgt files which are used to supplement the FASTA files while utilizing the database.\

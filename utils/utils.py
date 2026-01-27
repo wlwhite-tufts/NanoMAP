@@ -10,14 +10,19 @@ import subprocess
 from glob import glob
 from sklearn.cluster import AgglomerativeClustering
 from functools import partial
-import sys
+import yaml
 
 #get main dir for repo
 repo_path = os.path.dirname(os.path.abspath(__file__))
 repo_path = '/'.join(repo_path.split('/')[:-1])
-sys.path.append(repo_path)
-from data.user_data import gfold_sif, mmseqs_sif
-    
+
+#load relevant variables from YAML
+with open(f'{repo_path}/data/user_data.yml', 'r') as f:
+    user_data = yaml.safe_load(f)
+
+    gfold_sif = user_data['paths']['gfold_sif']
+    mmseqs_sif = user_data['paths']['mmseqs_sif']
+
 def run_gfold(q,init_file,final_file,out_file):
     '''
     Run GFold enrichment calculations on the data in the provided files.

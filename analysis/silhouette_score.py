@@ -8,14 +8,19 @@ from multiprocessing import Pool
 from tqdm import tqdm
 import argparse
 from scipy.spatial.distance import squareform
+import yaml
 
 #get main dir for repo
 repo_path = os.path.dirname(os.path.abspath(__file__))
 repo_path = '/'.join(repo_path.split('/')[:-1])
 sys.path.append(repo_path)
-from utils import weighted_anarci_dist, ANARCI_dist_row, get_fam_reps, fill_in_weighted_anarci_dists, approx_avg_internal_anarci_dist, \
+from utils.utils import weighted_anarci_dist, ANARCI_dist_row, get_fam_reps, fill_in_weighted_anarci_dists, approx_avg_internal_anarci_dist, \
                   get_pairwise_cluster_rep_distances, agg_clust_to_max_extra_reps, get_anarci_alignment
-from data.user_data import mmseqs_sif
+                  
+#load relevant variables from YAML
+with open(f'{repo_path}/data/user_data.yml', 'r') as f:
+    user_data = yaml.safe_load(f)
+    mmseqs_sif = user_data['paths']['mmseqs_sif']
 
 def get_args():
     #get user inputs

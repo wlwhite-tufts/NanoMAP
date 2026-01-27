@@ -1,16 +1,22 @@
 import os
 import argparse
 from glob import glob
-import sys
 import subprocess
 import numpy as np
+import yaml
 
 #get main dir for repo
 repo_path = os.path.dirname(os.path.abspath(__file__))
 repo_path = '/'.join(repo_path.split('/')[:-1])
-sys.path.append(repo_path)
-from data.user_data import presto_path, changeo_path, igblast_path
 
+#load relevant variables from YAML
+with open(f'{repo_path}/data/user_data.yml', 'r') as f:
+    user_data = yaml.safe_load(f)
+
+    presto_path = user_data['paths']['presto_path']
+    changeo_path = user_data['paths']['changeo_path']
+    igblast_path = user_data['paths']['igblast_path']
+    
 def get_args():
     
     parser = argparse.ArgumentParser(prog='Assemble and filter reads',

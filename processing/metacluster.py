@@ -21,7 +21,7 @@ from itertools import repeat
 repo_path = os.path.dirname(os.path.abspath(__file__))
 repo_path = '/'.join(repo_path.split('/')[:-1])
 sys.path.append(repo_path)
-from utils import *
+from utils.utils import *
 from analysis.fast_silhouette_score import weighted_ANARCI_silhouette_fast
 
 def get_args():
@@ -331,8 +331,13 @@ def metacluster(args,vhh,out_dir,out_fname,pool,ncpus):
     vhh['fake_junction'] = 'A'
     #run hclust in R
     vhh.to_csv(f'{out_dir}tmp_input_{out_fname}')
-    code = subprocess.run(['Rscript', '/cluster/tufts/cowenlab/wwhite06/vhh/scripts/hclust_V-J-len_only_util.R',
-                          f'{out_dir}tmp_input_{out_fname}', f'{out_dir}tmp_output_{out_fname}', 'fake_junction']).returncode
+    code = subprocess.run(['Rscript', f'{repo_path}/utils/SCOPer_hclust_util.R',
+                                      f'{out_dir}tmp_input_{out_fname}', #input file
+                                      f'{out_dir}tmp_output_{out_fname}', #output file
+                                      '1', #arbitrary cutoff since CDR3 sequences are all identical
+                                      'single', #single linkage so that anything with overlapping V/J calls is in the same cluster
+                                      'fake_junction',#col for fake CDR3 seqs
+                                      'scoper_group']).returncode #col name for cluster IDs
     assert code==0
     #get hclust data
     vhh = pd.read_csv(f'{out_dir}tmp_output_{out_fname}',na_filter=False)

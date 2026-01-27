@@ -3,13 +3,18 @@ from glob import glob
 import os
 import subprocess
 import numpy as np
-import sys
+import yaml
 
 #get main dir for repo
 repo_path = os.path.dirname(os.path.abspath(__file__))
 repo_path = '/'.join(repo_path.split('/')[:-1])
-sys.path.append(repo_path)
-from data.user_data import R1_primer_file, R2_primer_file
+
+#load relevant variables from YAML
+with open(f'{repo_path}/data/user_data.yml', 'r') as f:
+    user_data = yaml.safe_load(f)
+
+    R1_primer_file = user_data['paths']['R1_primer_file']
+    R2_primer_file = user_data['paths']['R2_primer_file']
 
 def get_args(path):
     

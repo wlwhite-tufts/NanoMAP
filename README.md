@@ -2,7 +2,7 @@
 This repository contains code for processing and analyzing VHH (nanobody) sequences using NanoMAP.
 
 # Installation
-## Setup the conda environment
+## Install packages
 1. Navigate into the directory where you've cloned this repo and run the following commands:
 ```
 conda env create -f data/nanomap_env.yml
@@ -11,6 +11,18 @@ conda activate nanomap
 2. Install ANARCI, following the instructions in their GitHub repo: https://github.com/oxpig/ANARCI
 3. Install R, following the instructions here: https://www.r-project.org/
 4. Install singularity, following the instructions here: https://docs.sylabs.io/guides/3.0/user-guide/installation.html#installation
+5. Install the necessary R packages with the following command:
+```
+Rscript utils/install_R_packages.R
+```
+
+## Clone GitHub repos
+Navigate to a directory where you want to clone the SCOPer, Change-O, and pRESTO packages and run the following commands:
+```
+git clone https://github.com/immcantation/scoper
+git clone https://github.com/immcantation/changeo
+git clone https://github.com/immcantation/presto
+```
 
 ## Install IgBLAST (with our updated alpaca V/J segments)
 Naviagte to a directory that you want to install IgBLAST in and run the following commands to download the package.

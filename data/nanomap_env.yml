@@ -11,8 +11,10 @@ dependencies:
   - biopython
   - matplotlib
   - seaborn
+  - bioconda::r-scoper
   - pip
   - pip:
     - glob2
     - tqdm
     - levenshtein
+    - PyYAML

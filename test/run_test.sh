@@ -1,6 +1,6 @@
 #test batching and assembly/filtering
-python ../processing/make_fastq_batches.py --in_dir fastq/ --cmd_file assembly_cmds.sh --N 2
-cat assembly_cmds.sh | bash
+#python ../processing/make_fastq_batches.py --in_dir fastq/ --cmd_file assembly_cmds.sh --N 2
+#cat assembly_cmds.sh | bash
 
 #test clustering
 python ../processing/metacluster.py --in_dir tsv --out_file metaclust.csv --meta_min_id 0.25  --meta_method single average complete --max_subgroup_size 200 --sample_N_pairs 10 --recursive_min_id_step 0.15

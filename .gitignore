@@ -175,6 +175,3 @@ cython_debug/
 
 #don't include big files
 data/sif/
-
-#don't include my cluster-specific paths
-data/user_data.yml

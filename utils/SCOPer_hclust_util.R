@@ -1,15 +1,9 @@
-.libPaths(c(.libPaths(), "/cluster/tufts/hpc/tools/R/4.3.0"))
 library('magrittr')
 library('dplyr')
 library('foreach')
 library('doParallel')
 library('alakazam')
-library('yaml')
-library('this.path')
-yaml_path = paste0(this.dir(), '/../data/user_data.yml')
-user_data <- yaml.load_file(yaml_path)
-
-source(user_data$paths$scoper_functions)
+library('scoper')
 
 args = commandArgs(trailingOnly=TRUE)
 input_file <- args[1]

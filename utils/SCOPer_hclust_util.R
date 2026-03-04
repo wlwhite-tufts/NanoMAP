@@ -1,12 +1,12 @@
-.libPaths("/cluster/tufts/hpc/tools/R/4.3.0")
+.libPaths(c(.libPaths(), "/cluster/tufts/hpc/tools/R/4.3.0"))
 library('magrittr')
 library('dplyr')
 library('foreach')
 library('doParallel')
 library('alakazam')
 library('yaml')
-library('here')
-yaml_path = here('data/user_data.yml')
+library('this.path')
+yaml_path = paste0(this.dir(), '/../data/user_data.yml')
 user_data <- yaml.load_file(yaml_path)
 
 source(user_data$paths$scoper_functions)
@@ -24,7 +24,7 @@ dat <- read.csv(input_file, header = T, stringsAsFactors = F)
 cat("Inferring Clones:\n")
 system.time(
 # Clonal assignment using hierarchical clustering
-db <- scoper::hierarchicalClones(dat, 
+db <- hierarchicalClones(dat, 
                              threshold = cutoff, 
                              linkage = linkage,
                              method = 'nt',

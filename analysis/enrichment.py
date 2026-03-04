@@ -27,6 +27,9 @@ def get_args():
     parser.add_argument('--fam_col',type=str,default='meta_clone_id_single_0.25',help='The column name to use for identifying families of sequences.')
     parser.add_argument('--gfold_quant',type=float,default=[0.01],nargs='*',help='The folder to store the preseq analysis results in if requested.')
     parser.add_argument('--header',type=str,default=[],nargs='*',help='The column names from sample_file to add as header descriptions to each of the columns.')
+    parser.add_argument('--fam_only',action='store_true',help='Set this flag to skip enrichment calculations at the VHH level, resulting in only the family-level file being written.')
+    parser.add_argument('--fc_only',action='store_true',help='Set this flag to save disk space by retaining only the family label and fold-change/GFOLD info columns.')
+    parser.add_argument('--has_counts',action='store_true',help='Set this flag to indicate that the input file already has count data merged onto it, so the count merging step can be skipped.')
     
     return parser.parse_args()
 
@@ -56,25 +59,33 @@ if __name__ == '__main__':
     #otherwise, for some reason sometimes the same id can be read in as a string or an int
     global_set[args.fam_col] = global_set[args.fam_col].astype(str)
     
-    #merge on individual experiment counts
-    for i,row in tqdm(sample_df.iterrows()):
-        # print(row['name'], row['file'], flush=True)
-        tsv_data = pd.read_csv(row['file'],sep='\t')[['sequence','duplicate_count']]
-        # print(tsv_data['duplicate_count'].sum(), flush=True)
-        tsv_data = tsv_data.rename(columns={'duplicate_count':row['name']})
-        # print(tsv_data[row['name']].sum(), flush=True)
-    
-        global_set = global_set.merge(tsv_data,on='sequence',how='left')
-        # print(global_set[row['name']].sum(), flush=True)
-        global_set.loc[np.isnan(global_set[row['name']]),row['name']] = 0 #set NaNs to 0
-        # print(global_set[row['name']].sum(), flush=True)
-        # print('-'*50)
+    if not args.has_counts:
+        #merge on individual experiment counts
+        for i,row in tqdm(sample_df.iterrows()):
+            # print(row['name'], row['file'], flush=True)
+            tsv_data = pd.read_csv(row['file'],sep='\t')[['sequence','duplicate_count']]
+            # print(tsv_data['duplicate_count'].sum(), flush=True)
+            tsv_data = tsv_data.rename(columns={'duplicate_count':row['name']})
+            # print(tsv_data[row['name']].sum(), flush=True)
+        
+            global_set = global_set.merge(tsv_data,on='sequence',how='left')
+            # print(global_set[row['name']].sum(), flush=True)
+            global_set.loc[np.isnan(global_set[row['name']]),row['name']] = 0 #set NaNs to 0
+            # print(global_set[row['name']].sum(), flush=True)
+            # print('-'*50)
+            
+    #drop enrichment columns if they exist
+    global_set = global_set[[col for col in global_set.columns if ('gfold' not in col) and ('enrich' not in col)]].copy()
         
     #sort by VHH_duplicate_count for later
-    global_set = global_set.sort_values(by=['VHH_duplicate_count','duplicate_count'],ignore_index=True,ascending=False) #highest first
-    
+    if 'duplicate_count' in global_set.columns:
+        global_set = global_set.sort_values(by=['VHH_duplicate_count','duplicate_count'],ignore_index=True,ascending=False) #highest first
+    else:
+        global_set = global_set.sort_values(by=['VHH_duplicate_count'],ignore_index=True,ascending=False) #highest first
+        
     #save global set with count info
-    global_set.to_csv(GS_file.replace('.csv','_tabulated.csv'),index=False)
+    if (not args.fam_only) and (not args.has_counts):
+        global_set.to_csv(GS_file.replace('.csv','_tabulated.csv'),index=False)
             
     ####################
     # calculate fold changes based on VHH-aggregated or clone_id-aggregated data
@@ -96,20 +107,29 @@ if __name__ == '__main__':
         #sum the duplicate count
         else:
             agg_funcs[c] = np.sum
+            
+    base_dir = '/'.join(GS_file.split('/')[:-1])
+    base_name = GS_file.split('/')[-1].replace('_final_clusters','').replace('_clust','').replace('_metaclustering','').replace('.csv','')
     
-    vhh = aggregate_and_calculate_fc(global_set,agg_funcs,args.seq_col,pair_df,args.gfold_quant,pool)
-    fam = aggregate_and_calculate_fc(global_set,agg_funcs,args.fam_col,pair_df,args.gfold_quant,pool)
+    if not args.fam_only:
+        vhh = aggregate_and_calculate_fc(global_set,agg_funcs,args.seq_col,pair_df,args.gfold_quant,pool,tmpdir=f'{base_dir}/tmp_{base_name}{args.suffix}')
+    fam = aggregate_and_calculate_fc(global_set,agg_funcs,args.fam_col,pair_df,args.gfold_quant,pool,tmpdir=f'{base_dir}/tmp_{base_name}{args.suffix}')
     
     ####################
     # add header if requested
     ####################
     
     if len(args.header):
-        
-        vhh = add_header(vhh, args.header, sample_df)
+        if not args.fam_only:
+            vhh = add_header(vhh, args.header, sample_df)
         fam = add_header(fam, args.header, sample_df)
+        
+    #save files
+    if args.fc_only:
+        keep_cols = [args.fam_col]+[col for col in fam.columns if ('enrich' in col) or ('gfold' in col)]
+    else:
+        keep_cols = fam.columns
     
-    base_dir = '/'.join(GS_file.split('/')[:-1])
-    base_name = GS_file.split('/')[-1].replace('_final_clusters','').replace('_clust','').replace('_metaclustering','').replace('.csv','')
-    vhh.to_csv(f'{base_dir}/{base_name}{args.suffix}_gfold_vhh.csv',index=len(args.header)>0)
-    fam.to_csv(f'{base_dir}/{base_name}{args.suffix}_gfold_fam.csv',index=len(args.header)>0)
+    if not args.fam_only:
+        vhh[keep_cols].to_csv(f'{base_dir}/{base_name}{args.suffix}_gfold_vhh.csv',index=len(args.header)>0)
+    fam[keep_cols].to_csv(f'{base_dir}/{base_name}{args.suffix}_gfold_fam.csv',index=len(args.header)>0)

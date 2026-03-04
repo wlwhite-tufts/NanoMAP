@@ -11,9 +11,12 @@ dependencies:
   - biopython
   - matplotlib
   - seaborn
+  - networkx
   - bioconda::r-scoper
   - pip
   - pip:
+    - igraph
+    - leidenalg
     - glob2
     - tqdm
     - levenshtein

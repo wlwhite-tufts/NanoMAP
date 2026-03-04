@@ -91,7 +91,7 @@ def weighted_ANARCI_silhouette_fast(full_df, id_cols, dist_param_map, sample_N_p
                                           ([full_df.iloc[external[i,0],:].loc[['CDR1','CDR2','CDR3']].tolist(),full_df.iloc[external[i,1],:].loc[['CDR1','CDR2','CDR3']].tolist()] for i in range(sample_N_pairs)))
             internal_dists = 1
             
-        else: #main case - sample randim pairs untul there are enough of each type
+        else: #main case - sample randim pairs until there are enough of each type
             N_ext = 0
             N_int = 0
             internal = np.zeros([sample_N_pairs,2])
@@ -132,7 +132,7 @@ def weighted_ANARCI_silhouette_fast(full_df, id_cols, dist_param_map, sample_N_p
                                                     weight_scheme=weight_scheme,
                                                     max_len_diffs=max_len_diff),
                                             ([full_df.iloc[external[i,0],:].loc[['CDR1','CDR2','CDR3']].tolist(),full_df.iloc[external[i,1],:].loc[['CDR1','CDR2','CDR3']].tolist()] for i in range(sample_N_pairs)))
-        
+                                            
         score = np.mean(external_dists) - np.mean(internal_dists)
 
         score_df.append([id_col,score])

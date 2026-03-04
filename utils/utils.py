@@ -53,7 +53,7 @@ def run_gfold(q,init_file,final_file,out_file):
     gfold_result = subprocess.run(cmd)
     assert gfold_result.returncode == 0
     
-def aggregate_and_calculate_fc(data,agg_funcs,agg_col,pair_df,gfold_quantiles,pool):
+def aggregate_and_calculate_fc(data,agg_funcs,agg_col,pair_df,gfold_quantiles,pool,tmpdir='tmp'):
     '''
     Calculate enrichment and GFold values for the specified pairs of groups of columns.
     
@@ -91,9 +91,9 @@ def aggregate_and_calculate_fc(data,agg_funcs,agg_col,pair_df,gfold_quantiles,po
     print(f'{len(result)} unique {agg_col} values.',flush=True)
     
     #run GFOLD on aggregated data
-    os.mkdir('tmp')
-    os.mkdir('tmp/inputs')
-    os.mkdir('tmp/outputs')
+    os.mkdir(tmpdir)
+    os.mkdir(f'{tmpdir}/inputs')
+    os.mkdir(f'{tmpdir}/outputs')
     
     #create datasets to compare
     datasets = set(pair_df['initial'].tolist()+pair_df['final'].tolist())
@@ -112,13 +112,13 @@ def aggregate_and_calculate_fc(data,agg_funcs,agg_col,pair_df,gfold_quantiles,po
         #rearrange columns to match GFOLD:
         #GeneSymbol, GeneName, Read Count, Gene exon length, RPKM
         for_gfold = for_gfold[['sequence_id','2','sum','4','5']]
-        for_gfold.to_csv(f'tmp/inputs/{ds_idx}_{agg_col}.tsv',sep='\t',index=False,header=False)
+        for_gfold.to_csv(f'{tmpdir}/inputs/{ds_idx}_{agg_col}.tsv',sep='\t',index=False,header=False)
         
     #run GFOLD in parallel for each user-specified quantile
     pool.starmap(run_gfold, ((q,
-                              f'tmp/inputs/{short[row["initial"]]}_{agg_col}',
-                              f'tmp/inputs/{short[row["final"]]}_{agg_col}',
-                              f'tmp/outputs/{row["name"]}_{agg_col}_{str(q).split(".")[1]}.tsv') for q in gfold_quantiles for i,row in pair_df.iterrows()),
+                              f'{tmpdir}/inputs/{short[row["initial"]]}_{agg_col}',
+                              f'{tmpdir}/inputs/{short[row["final"]]}_{agg_col}',
+                              f'{tmpdir}/outputs/{row["name"]}_{agg_col}_{str(q).split(".")[1]}.tsv') for q in gfold_quantiles for i,row in pair_df.iterrows()),
                  chunksize=1)
     
     #collect GFOLD results
@@ -127,7 +127,7 @@ def aggregate_and_calculate_fc(data,agg_funcs,agg_col,pair_df,gfold_quantiles,po
         
         for name in pair_df['name']:
             gfold_name = f'gfold{q_str}_{name}'
-            gfold = pd.read_csv(f'tmp/outputs/{name}_{agg_col}_{q_str}.tsv',sep='\t',header=9,
+            gfold = pd.read_csv(f'{tmpdir}/outputs/{name}_{agg_col}_{q_str}.tsv',sep='\t',header=9,
                                 names=['sequence_id','GeneName',gfold_name,'E-FDR','log2fdc','1stRPKM','2ndRPKM'])
             gfold = gfold[['sequence_id',gfold_name]]
 
@@ -152,7 +152,7 @@ def aggregate_and_calculate_fc(data,agg_funcs,agg_col,pair_df,gfold_quantiles,po
         result = result.assign(**{f'enrich_{row["name"]}': np.log2((final_frac+fudge_factor)/(init_frac+fudge_factor))})
     
     #clean up tmp folder    
-    subprocess.run(['rm','-r','tmp'])
+    subprocess.run(['rm','-r', tmpdir])
     
     #remove unnecessary columns
     for col in ['X','duplicate_count','VHH_duplicate_count','dist_nearest','centroid','centroid_id','family_homology_CDR3','is_outlier']:
@@ -370,6 +370,20 @@ def weighted_anarci_dist(CDR_list1,CDR_list2,weight_scheme,max_len_diffs):
         
     return dist_tot/weight_tot #compute weighted percent identity
     
+def weighted_anarci_dist_no_align(CDR_list1, CDR_list2, weight_scheme):
+    
+    #set dist to 100% if either of the pair had no ANARCI parse
+    if np.any(CDR_list1[0] == '*') or np.any(CDR_list2[0] == '*'):
+        return 1
+        
+    dist_tot = 0
+    weight_tot = 0
+    for i in range(3):
+        dist_tot += np.sum(CDR_list1[i]!=CDR_list2[i])*weight_scheme[i]
+        weight_tot += len(CDR_list1[i])*weight_scheme[i]
+        
+    return dist_tot/weight_tot
+    
 def ANARCI_dist_row(CDR_list1,CDR_list_list,weight_scheme,max_len_diffs):
     '''
     Wrapper to calculate distances from a single VHH sequence to all VHHs in a list
@@ -567,6 +581,65 @@ def batched_pairwise_weighted_anarci_dist(CDR_list, batch_size, weight_scheme, m
             i+=1
     idxs = np.tril_indices(dists.shape[0], k=-1)
     dists[idxs] = dists.T[idxs]
+    return dists
+    
+def weighted_anarci_dist_all_pairs_no_align(CDR_list1, CDR_list2, same, weight_scheme):
+    #if given two lists, compare all cross-list pairs
+    if not same:
+        dists = np.zeros([len(CDR_list1),len(CDR_list2)])*np.nan
+        for i,cdrs1 in enumerate(CDR_list1):
+            for ii,cdrs2 in enumerate(CDR_list2):
+                dists[i,ii] = weighted_anarci_dist_no_align(cdrs1,cdrs2,weight_scheme)
+    #otherwise, compare all pairs within the single list
+    else:
+        dists = np.zeros([len(CDR_list1)]*2)*np.nan
+        for i,cdrs1 in enumerate(CDR_list1[:-1]):
+            for ii,cdrs2 in enumerate(CDR_list1[i+1:]):
+                dists[i,ii+i+1] = weighted_anarci_dist_no_align(cdrs1,cdrs2,weight_scheme)
+        dists[np.diag_indices(dists.shape[0])] = 0
+                
+    return dists
+    
+def batched_pairwise_weighted_anarci_dist_no_align(CDR_list, batch_size, weight_scheme, pool):
+    N_seqs = len(CDR_list)
+    
+    N_batches = int(np.ceil(N_seqs/batch_size))
+    batches = ([CDR_list[b1*batch_size:(b1+1)*batch_size], CDR_list[b2*batch_size:(b2+1)*batch_size], b1==b2] for b1 in range(N_batches) for b2 in range(b1,N_batches))
+    dist_batches = pool.starmap(partial(weighted_anarci_dist_all_pairs_no_align,
+                                        weight_scheme=weight_scheme), batches)
+    dists = np.zeros([N_seqs]*2)*np.nan
+    i = 0
+    for b1 in range(N_batches):
+        for b2 in range(b1,N_batches):
+            dists[b1*batch_size:(b1+1)*batch_size,b2*batch_size:(b2+1)*batch_size] = dist_batches[i]
+            i+=1
+    idxs = np.tril_indices(dists.shape[0], k=-1)
+    dists[idxs] = dists.T[idxs]
+    return dists
+    
+def weighted_anarci_dist_all_pairs_filtered(input_tuple):
+    CDR_list1, CDR_list2, start1, start2, max_dist, cdr3_weight, max_len_diff = input_tuple
+    
+    weight_scheme = [1,1,cdr3_weight]
+    max_len_diffs = [max_len_diff]*3
+    
+    dists = []
+    
+    #if given two lists, compare all cross-list pairs
+    if start1!=start2:
+        for i,cdrs1 in enumerate(CDR_list1):
+            for ii,cdrs2 in enumerate(CDR_list2):
+                d = weighted_anarci_dist(cdrs1,cdrs2,weight_scheme,max_len_diffs)
+                if d <= max_dist:
+                    dists.append((i+start1, ii+start2, {'dist':d}))
+    #otherwise, compare all pairs within the single list
+    else:
+        for i,cdrs1 in enumerate(CDR_list1[:-1]):
+            for ii in range(i+1,len(CDR_list1)):
+                cdrs2 = CDR_list1[ii]
+                d = weighted_anarci_dist(cdrs1,cdrs2,weight_scheme,max_len_diffs)
+                if d <= max_dist:
+                    dists.append((i+start1, ii+start2, {'dist':d}))
     return dists
     
 def get_pairwise_cluster_rep_distances(df,id_cols,n_reps):
@@ -916,3 +989,11 @@ def add_header(df, header_names, sample_df):
             
     df.columns = pd.MultiIndex.from_tuples(header,names=header_names+['full_name'])
     return df
+    
+def get_CDR_len_combo(row):
+    
+    cdr_id = 0
+    for c in range(1,4):
+        cdr_id += (1000**(3-c))*len(row[f'CDR{c}'])
+        
+    return cdr_id

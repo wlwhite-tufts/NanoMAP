@@ -73,7 +73,7 @@ mv gfold_1.1.4--gsl1.16_1 gfold-1.1.4.sif
 ```
 
 ## Input your local paths
-Edit the `data/user_data.py` file to match the locations on your machine where you cloned this repo and downloaded the sif files.
+Edit the `data/user_data.yml` file to match the locations on your machine where you cloned this repo, downloaded the sif files, installed IgBLAST, and cloned the Immcantation repos.
 If you are going to be consistently using the same primers to amplify your cDNA for sequencing, create one fasta file for the forward primer(s), and one for the reverse primer(s) and update the primer section of `data/user_data.py` to provide the locations of those fasta files.
 
 ## test that everything has been installed correctly
@@ -124,13 +124,13 @@ Once all the assembly/filtering commands are finished running, you should have a
 After completing the pre-processing, run the following command to cluster all the sequences in your dataset:
 ```
 cd <directory where you ran the make_fastq_batches.py script>
-python <path to NanoMAP>/processing/metacluster.py --in_dir assembly --out_file metaclustered_data.csv
+python <path to NanoMAP>/processing/NanoMAP_ind.py --in_dir assembly --out_file metaclustered_data.csv
 ```
 Before running the command, fill in the `<your text here>` fields and change the --out_file flag if you want a different name for the clustered output file.\
 This script is fairly compute-intensive. For our datasets, the following computational resources were required:\
-Schistosomes (4.0M reads, 195k unique): 40 cores, 42G memory, 4h:05m wall-clock time\
-CoV (7.2M reads, 326k unique): 40 cores, 47G memory, 7h:13m wall-clock time\
-BoNT/A (14.1M reads, 582k unique): 40 cores, 131G memory, 11h:30m wall-clock time\
+Schistosomes (4.0M reads, 195k unique): 10 cores, 8G memory, 0h:27m wall-clock time\
+CoV (9.8M reads, 326k unique): 10 cores, 23G memory, 0h:44m wall-clock time\
+BoNT/A (14.1M reads, 582k unique): 10 cores, 25G memory, 1h:14m wall-clock time\
 Exact runtimes and memory requirements will depend on the size and diversity of your data, but these can be useful benchmarks when deciding how many resources to allocate for your own clustering.\
 \
 The result of this step is a single large csv file that lists every unique DNA sequence in the dataset along with some annotations including the cluster labels from the meta-clustering, CDR sequences, and V/D/J segment calls.

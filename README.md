@@ -160,7 +160,8 @@ The result will be two new csv files:
 Both files will have the same columns, which include all of the columns that were in `metaclustered_data.csv` plus three new sets of columns:
 1. Raw reads - there will be one of these columns per row in `sample_info.csv`, with the raw read counts for each sequence (or cluster) in each sample. These column names will exactly match the values in the `name` column of `sample_info.csv`.
 2. enrichments - there will be one of these columns per row in `enrich_pairs.csv`, with the log of the ratio of the read counts for the samples described by that row. These column names will look like `enrich_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.
-3. gfold - there will be one of these columns per row in `enrich_pairs.csv`, with the gfold value comparing the samples described by that row. These column names will look like `gfold01_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.\\
+3. gfold - there will be one of these columns per row in `enrich_pairs.csv`, with the gfold value comparing the samples described by that row. These column names will look like `gfold01_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.\
+\
 Note: if you used a different clustering than `NanoMAP_ind`, you will need to set the `--fam_col` flag to match the column name that contains the cluster label information in your `clustered_data.csv` file.
 
 ## Scoring (optional)

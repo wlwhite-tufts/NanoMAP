@@ -1,8 +1,8 @@
 paths:
-    presto_path: /cluster/tufts/cowenlab/immcantation_suite/presto/bin
-    changeo_path: /cluster/tufts/cowenlab/immcantation_suite/changeo/bin
-    igblast_path: /cluster/tufts/cowenlab/wwhite06/packages/igblast_v3/ncbi-igblast-1.22.0
-    gfold_sif: /cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/data/sif/gfold-1.1.4.sif
-    mmseqs_sif: /cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/data/sif/mmseqs2-17.b804f.sif
-    R1_primer_file: /cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/data/primers/AlpVHH_R1_primers_05Feb24.fasta
-    R2_primer_file: /cluster/tufts/cowenlab/wwhite06/packages/VHH-clustering/data/primers/AlpVHH_R2_primers_05Feb24.fasta
+    presto_path: <your install path>/presto/bin #fill in with the location where you cloned the presto repo
+    changeo_path: <your install path>/changeo/bin #fill in with the location where you cloned the changeo repo
+    igblast_path: <your install path>/ncbi-igblast-1.22.0 #fill in with the location where you installed IgBLAST
+    gfold_sif: <your install path>/NanoMAP/data/sif/gfold-1.1.4.sif #fill in with the location where you cloned this repo (or change the whole path if you downloaded the sif file somewhere else)
+    mmseqs_sif: <your install path>/NanoMAP/data/sif/mmseqs2-17.b804f.sif #fill in with the location where you cloned this repo (or change the whole path if you downloaded the sif file somewhere else)
+    R1_primer_file: <your install path>/NanoMAP/data/primers/AlpVHH_R1_primers_05Feb24.fasta #fill in with the location where you cloned this repo (or change the whole path if you're using different primers)
+    R2_primer_file: <your install path>/NanoMAP/data/primers/AlpVHH_R2_primers_05Feb24.fasta #fill in with the location where you cloned this repo (or change the whole path if you're using different primers)

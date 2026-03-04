@@ -14,7 +14,6 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform, pdist
 from Levenshtein import distance
 from functools import partial
-from itertools import repeat
 import networkx as nx
 import igraph
 import leidenalg
@@ -25,7 +24,6 @@ repo_path = '/'.join(repo_path.split('/')[:-1])
 sys.path.append(repo_path)
 from utils.utils import *
 from analysis.fast_silhouette_score import weighted_ANARCI_silhouette_fast
-from processing.metacluster import annotate_and_filter_seqs, collect_seqs
 
 def get_args():
     #get user inputs
@@ -63,20 +61,9 @@ def get_args():
     
     #metaclusterign args
     parser.add_argument('--meta_max_dist',type=float,default=[0.75],nargs='*',help='Maximum fraction of disagreeing clusterings to group two VHHs. If given multiple values will try all.')
-    parser.add_argument('--meta_method',type=str,default=['single'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
+    parser.add_argument('--meta_method',type=str,default=['average'],nargs='*',help='Linkage method to use for meta clustering (can be single, average, or complete). If given multiple values will try all.')
     
     return parser.parse_args()
-    
-def pairwise_batch_generator(items,batch_size,extras):
-    N_batches = int(np.ceil(len(items)/batch_size))
-    for b1 in range(N_batches):
-        start1 = b1*batch_size
-        end1 = (b1+1)*batch_size
-        for b2 in range(b1,N_batches):
-            start2 = b2*batch_size
-            end2 = (b2+1)*batch_size
-            
-            yield items[start1:end1], items[start2:end2], start1, start2, *extras
             
 def get_greedy_rep_clustering(input_tuple):
     os.environ["NX_CUGRAPH_AUTOCONFIG"] = "True"

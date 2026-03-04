@@ -14,7 +14,6 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform, pdist
 from Levenshtein import distance
 from functools import partial
-from itertools import repeat
 import igraph
 import leidenalg
 
@@ -24,7 +23,6 @@ repo_path = '/'.join(repo_path.split('/')[:-1])
 sys.path.append(repo_path)
 from utils.utils import *
 from analysis.fast_silhouette_score import weighted_ANARCI_silhouette_fast
-from processing.metacluster import annotate_and_filter_seqs, collect_seqs
 
 def get_args():
     #get user inputs
@@ -54,17 +52,6 @@ def get_args():
     parser.add_argument('--dist_batch_size',type=int,default=1000,help='When calculating all pairwise distances between sequences in a set, break the calculation into sets of dist_batch_size (so that dist_batch_size**2 distances are calculated per batch).')
     
     return parser.parse_args()
-    
-def pairwise_batch_generator(items,batch_size,extras):
-    N_batches = int(np.ceil(len(items)/batch_size))
-    for b1 in range(N_batches):
-        start1 = b1*batch_size
-        end1 = (b1+1)*batch_size
-        for b2 in range(b1,N_batches):
-            start2 = b2*batch_size
-            end2 = (b2+1)*batch_size
-            
-            yield items[start1:end1], items[start2:end2], start1, start2, *extras
 
 def cluster(args,vhh,out_dir,out_fname,pool,ncpus):
     

@@ -24,7 +24,7 @@ def get_args():
     parser.add_argument('--pair_file',type=str,help='The csv file denoting which gorups of samples should be compared to each other for enrichment analysis.')
     parser.add_argument('--suffix',type=str,default='',help='Additional suffix for output csv files.')
     parser.add_argument('--seq_col',type=str,default='VHH',help='The column name to use for identifying unique sequences.')
-    parser.add_argument('--fam_col',type=str,default='meta_clone_id_single_0.25',help='The column name to use for identifying families of sequences.')
+    parser.add_argument('--fam_col',type=str,default='clone_id',help='The column name to use for identifying families of sequences.')
     parser.add_argument('--gfold_quant',type=float,default=[0.01],nargs='*',help='The folder to store the preseq analysis results in if requested.')
     parser.add_argument('--header',type=str,default=[],nargs='*',help='The column names from sample_file to add as header descriptions to each of the columns.')
     parser.add_argument('--fam_only',action='store_true',help='Set this flag to skip enrichment calculations at the VHH level, resulting in only the family-level file being written.')
@@ -109,7 +109,7 @@ if __name__ == '__main__':
             agg_funcs[c] = np.sum
             
     base_dir = '/'.join(GS_file.split('/')[:-1])
-    base_name = GS_file.split('/')[-1].replace('_final_clusters','').replace('_clust','').replace('_metaclustering','').replace('.csv','')
+    base_name = GS_file.split('/')[-1].replace('.csv','')
     
     if not args.fam_only:
         vhh = aggregate_and_calculate_fc(global_set,agg_funcs,args.seq_col,pair_df,args.gfold_quant,pool,tmpdir=f'{base_dir}/tmp_{base_name}{args.suffix}')

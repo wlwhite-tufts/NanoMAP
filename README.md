@@ -91,16 +91,17 @@ assembly/test2_db-pass.tsv
 assembly/test3_db-pass.tsv
 assembly/test4_db-pass.tsv
 
-metaclust.csv
-metaclust_tabulated.csv
-metaclust_gfold_vhh.csv
-metaclust_gfold_fam.csv
+meta_clust.csv
+ind_clust.csv
+ind_clust_tabulated.csv
+ind_clust_gfold_vhh.csv
+ind_clust_gfold_fam.csv
 
 sil_score.csv
 pheno_score.csv
 ```
 
-# NanoMAP Meta-clustering Pipeline
+# NanoMAP Clustering Pipeline
 This pipeline starts with a group of fastq(.gz) files resulting from a paired-end sequencing run and produces clustered sequences with enrichment values calculated per cluster and per sequence. Each pair of fastq files (forward and reverse reads) should correspond to a single sample.
 
 ## Pre-processing
@@ -124,7 +125,7 @@ Once all the assembly/filtering commands are finished running, you should have a
 After completing the pre-processing, run the following command to cluster all the sequences in your dataset:
 ```
 cd <directory where you ran the make_fastq_batches.py script>
-python <path to NanoMAP>/processing/NanoMAP_ind.py --in_dir assembly --out_file metaclustered_data.csv
+python <path to NanoMAP>/processing/NanoMAP_ind.py --in_dir assembly --out_file clustered_data.csv
 ```
 Before running the command, fill in the `<your text here>` fields and change the --out_file flag if you want a different name for the clustered output file.\
 This script is fairly compute-intensive. For our datasets, the following computational resources were required:\
@@ -133,10 +134,11 @@ CoV (9.8M reads, 326k unique): 10 cores, 23G memory, 0h:44m wall-clock time\
 BoNT/A (14.1M reads, 582k unique): 10 cores, 25G memory, 1h:14m wall-clock time\
 Exact runtimes and memory requirements will depend on the size and diversity of your data, but these can be useful benchmarks when deciding how many resources to allocate for your own clustering.\
 \
-The result of this step is a single large csv file that lists every unique DNA sequence in the dataset along with some annotations including the cluster labels from the meta-clustering, CDR sequences, and V/D/J segment calls.
+The result of this step is a single large csv file that lists every unique DNA sequence in the dataset along with some annotations including the cluster labels from the clustering, CDR sequences, and V/D/J segment calls.\
+If you want to perform a meta-clustering instead, use the same command as above, but replace `NanoMAP_ind.py` with `NanoMAP_meta.py`
 
 ## Enrichment calculations
-While your clustering is running, you can prepare the necessary files to describe the enrichment calculations you want to perform. You will need two files: `sample_info.csv` and `enrich_pairs.csv` which contain information about each sample, and each pair of samples you want to compare, respectively. These files should be placed in the same directory as the `assembly` directory.
+While your clustering is running, you can prepare the necessary files to describe the enrichment calculations you want to perform. You will need two files: `sample_info.csv` and `enrich_pairs.csv` which contain information about each sample, and each pair of samples you want to compare, respectively. These files should be placed in the same directory as the `assembly` directory. Examples of these files can be found in the `test` directory.
 ### sample_info file
 Each row in this file corresponds to a sample that you want to use in enrichment analysis. The file must contain the following two columns:\
 `name` - a unique and descriptive, but ideally compact identifier for the sample\
@@ -150,15 +152,16 @@ Each row in this file corresponds to an enrichment calculation you want to do. T
 Once your clustering is done and you've created `sample_info.csv` and `enrich_pairs.csv`, you can run the enrichment analysis:
 ```
 cd <directory where you ran the make_fastq_batches.py script>
-python <path to NanoMAP>/analysis/enrichment.py --in_file metaclustered_data.csv --sample_file sample_info.csv --pair_file enrich_pairs.csv
+python <path to NanoMAP>/analysis/enrichment.py --in_file clustered_data.csv --sample_file sample_info.csv --pair_file enrich_pairs.csv
 ```
 The result will be two new csv files:
-`metaclustered_data_gfold_vhh.csv` - each row corresponds to a distinct amino acid sequence\
-`metaclustered_data_gfold_fam.csv` - each row corresponds to a distinct cluster (a.k.a. clonal family)\
+`clustered_data_gfold_vhh.csv` - each row corresponds to a distinct amino acid sequence\
+`clustered_data_gfold_fam.csv` - each row corresponds to a distinct cluster (a.k.a. clonal family)\
 Both files will have the same columns, which include all of the columns that were in `metaclustered_data.csv` plus three new sets of columns:
 1. Raw reads - there will be one of these columns per row in `sample_info.csv`, with the raw read counts for each sequence (or cluster) in each sample. These column names will exactly match the values in the `name` column of `sample_info.csv`.
 2. enrichments - there will be one of these columns per row in `enrich_pairs.csv`, with the log of the ratio of the read counts for the samples described by that row. These column names will look like `enrich_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.
 3. gfold - there will be one of these columns per row in `enrich_pairs.csv`, with the gfold value comparing the samples described by that row. These column names will look like `gfold01_{name}` where `name` matches the `name` column of `enrich_pairs.csv`.
+Note: if you used a different clustering than `NanoMAP_ind`, you will need to set the `--fam_col` flag to match the column name that contains the cluster label information in your `clustered_data.csv` file.
 
 ## Scoring (optional)
 To evaluate the quality of your clustering you can calculate the scores below.
@@ -168,8 +171,9 @@ The following code approximates the silhouette score as described in the NanoMAP
 You can calculate the silhouette score with the following command:
 ```
 cd <directory where you clustering results are>
-python <path to NanoMAP>/analysis/silhouette_score.py --in_file metaclustered_data.csv --out_file sil_score.csv --label_cols meta_clone_id_single_0.25
+python <path to NanoMAP>/analysis/silhouette_score.py --in_file clustered_data.csv --out_file sil_score.csv --label_cols clone_id
 ```
+Note: if you used a different clustering than `NanoMAP_ind`, you will need to set the `--label_cols` flag to match the column name(s) that contains the cluster label information in your `clustered_data.csv` file.
 
 ### Phenotypic quality score
 The following code approximates the phenotypuc quality score as described in the NanoMAP manuscript (without the final rescaling step). The score has no theoretical bounds, but higher scores are better.\
@@ -177,6 +181,7 @@ IMPORTANT: The phenotypic quality score is dependent on the size of the dataset,
 You can calculate the phenotypic quality score with the following command:
 ```
 cd <directory where you clustering results are>
-python <path to NanoMAP>/analysis/phenotype_quality.py --in_file metaclustered_data_gfold_vhh.csv --out_file phen_score.csv --label_cols meta_clone_id_single_0.25 --phenotype_cols <your columns here>
+python <path to NanoMAP>/analysis/phenotype_quality.py --in_file clustered_data_gfold_vhh.csv --out_file phen_score.csv --label_cols clone_id --phenotype_cols <your columns here>
 ```
-Before running, make sure to set the `--phenotype_cols` flag to indicate which columns in your clustering file contain binding data. These columns could be any subset of the `enrich_{name}` or `gfold01_{name}` columns produced by the `enrichment.py` script.
+Before running, make sure to set the `--phenotype_cols` flag to indicate which columns in your clustering file contain binding data. These columns could be any subset of the `enrich_{name}` or `gfold01_{name}` columns produced by the `enrichment.py` script.\
+Note: if you used a different clustering than `NanoMAP_ind`, you will need to set the `--label_cols` flag to match the column name(s) that contains the cluster label information in your `clustered_data.csv` file.

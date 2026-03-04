@@ -1,0 +1,2 @@
+median_estimated_unobs	lower_ci	upper_ci
+39106.7	37108.8	78630.7

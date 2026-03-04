@@ -185,4 +185,5 @@ cd <directory where you clustering results are>
 python <path to NanoMAP>/analysis/phenotype_quality.py --in_file clustered_data_gfold_vhh.csv --out_file phen_score.csv --label_cols clone_id --phenotype_cols <your columns here>
 ```
 Before running, make sure to set the `--phenotype_cols` flag to indicate which columns in your clustering file contain binding data. These columns could be any subset of the `enrich_{name}` or `gfold01_{name}` columns produced by the `enrichment.py` script.\
+\
 Note: if you used a different clustering than `NanoMAP_ind`, you will need to set the `--label_cols` flag to match the column name(s) that contains the cluster label information in your `clustered_data.csv` file.

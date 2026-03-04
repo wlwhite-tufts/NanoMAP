@@ -1,3 +1,5 @@
+options(repos = c(CRAN = "https://cran.rstudio.com"))
+
 install.packages('yaml')
 install.packages("this.path")
 

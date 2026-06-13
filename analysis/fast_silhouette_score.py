@@ -13,7 +13,7 @@ from functools import partial
 #get main dir for repo
 repo_path = os.path.dirname(os.path.abspath(__file__))
 repo_path = '/'.join(repo_path.split('/')[:-1])
-sys.path.append(repo_path)
+sys.path.insert(0, repo_path)
 from utils.utils import weighted_anarci_dist, get_anarci_alignment
 
 def get_args():

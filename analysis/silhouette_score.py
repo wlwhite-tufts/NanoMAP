@@ -13,7 +13,7 @@ import yaml
 #get main dir for repo
 repo_path = os.path.dirname(os.path.abspath(__file__))
 repo_path = '/'.join(repo_path.split('/')[:-1])
-sys.path.append(repo_path)
+sys.path.insert(0, repo_path)
 from utils.utils import weighted_anarci_dist, ANARCI_dist_row, get_fam_reps, fill_in_weighted_anarci_dists, approx_avg_internal_anarci_dist, \
                   get_pairwise_cluster_rep_distances, agg_clust_to_max_extra_reps, get_anarci_alignment
                   

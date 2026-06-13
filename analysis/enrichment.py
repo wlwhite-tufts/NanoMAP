@@ -11,7 +11,7 @@ from multiprocessing import Pool
 #get main dir for repo
 repo_path = os.path.dirname(os.path.abspath(__file__))
 repo_path = '/'.join(repo_path.split('/')[:-1])
-sys.path.append(repo_path)
+sys.path.insert(0, repo_path)
 from utils.utils import *
 
 def get_args():

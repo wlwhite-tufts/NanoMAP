@@ -1,0 +1,14 @@
+{
+  "mmseqs-individual-XLI2": "mmseqs_setcover_0.65",
+  "mmseqs-individual-JYH3": "mmseqs_connected_0.75",
+  "mmseqs-individual-XCE1": "mmseqs_connected_0.75",
+  "nanomap-individual-XLI2": "clone_id_1_5_3",
+  "nanomap-individual-JYH3": "clone_id_1_5_3",
+  "nanomap-individual-XCE1": "clone_id_1_5_3",
+  "nanomap-meta-XLI2": "meta_clone_id_average_0.75",
+  "nanomap-meta-JYH3": "meta_clone_id_average_0.75",
+  "nanomap-meta-XCE1": "meta_clone_id_single_0.65",
+  "scoper-individual-XLI2": "scoper_average_0.35",
+  "scoper-individual-JYH3": "scoper_average_0.35",
+  "scoper-individual-XCE1": "scoper_average_0.35"
+}
